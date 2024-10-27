@@ -228,7 +228,8 @@ class RaftMachine<NodeRef : RaftNode>(
                             if (nextHeartBeatTime <= now) {
                                 beat(peer)
                             }
-                            delay(configuration.heartbeatTimeout.millis)
+                            // Time has past, 'now' is not accurate anymore
+                            delay((now + configuration.heartbeatTimeout.millis) - System.currentTimeMillis())
                         }
                     }
                 }
@@ -239,7 +240,7 @@ class RaftMachine<NodeRef : RaftNode>(
         }
 
         override suspend fun onExit() {
-            heartbeat?.cancel()
+            heartbeat?.cancel(CancellationException("Role changed, close heartbeat"))
             heartbeat = null
         }
 
@@ -283,12 +284,7 @@ class RaftMachine<NodeRef : RaftNode>(
 
         private suspend fun beat(peer: NodeId) {
             val (nextIndex, matchIndex, lastTimeContacted) = peers[peer]!!
-            val entries = when {
-                lastTimeContacted * .00000000001 < lastAppendTime.get() ->
-                    persistence.getLogs(nextIndex, configuration.maxLogEntriesPerAppend)
-
-                else -> emptyList()
-            }
+            val entries = persistence.getLogs(nextIndex, configuration.maxLogEntriesPerAppend)
             logger.info("Heartbeat (last ${System.currentTimeMillis() - lastTimeContacted}ms ago) => $peer[T${persistence.getCurrentTerm()},$nextIndex,$matchIndex] (${entries.size})")
             peer.send(
                 RaftProtocol.AppendEntries(

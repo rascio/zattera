@@ -97,6 +97,7 @@ abstract class AbstractPersistedStateTest(
             persistedState.getLogs(0,1) shouldBe emptyList()
             persistedState.getLogs(1,1) shouldBe listOf(firstEntry)
             persistedState.getLogs(0,2) shouldBe listOf(firstEntry)
+            persistedState.getLogs(2, 1) shouldBe emptyList()
             persistedState.getLastEntryMetadata() shouldBe firstEntryMetadata
             persistedState.getLogMetadata(1) shouldBe firstEntryMetadata
             persistedState.getLogMetadata(2) shouldBe null

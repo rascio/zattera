@@ -1,3 +1,5 @@
+@file:OptIn(ExperimentalSerializationApi::class)
+
 package io.r.raft.transport.ktor
 
 import arrow.fx.coroutines.ResourceScope
@@ -21,13 +23,18 @@ import io.ktor.server.websocket.WebSockets
 import io.ktor.server.websocket.webSocket
 import io.ktor.utils.io.ByteReadChannel
 import io.ktor.websocket.readBytes
+import io.ktor.websocket.send
 import io.r.raft.LogEntryMetadata
 import io.r.raft.RaftMessage
 import io.r.raft.RaftProtocol
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.completeWith
+import kotlinx.serialization.ExperimentalSerializationApi
+import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.decodeFromStream
 import org.apache.logging.log4j.LogManager
+import java.io.ByteArrayInputStream
 import kotlin.time.Duration.Companion.seconds
 import io.ktor.client.plugins.websocket.WebSockets as ClientWebSockets
 
@@ -56,6 +63,8 @@ class KtorWebsocketTransportTest : FunSpec({
                     val client = installClient()
                     logger.info("Connecting")
                     client.connectWebSocket(1) {
+                        val init = initConnection()
+                        init shouldBe InitConnectionProtocol.Connected
                         logger.info("Connected")
                         sendSerialized(aMessage)
                         logger.info("Sent")
@@ -75,6 +84,8 @@ class KtorWebsocketTransportTest : FunSpec({
                     server.start()
                     val client = installClient()
                     client.connectWebSocket(1) {
+                        val init = initConnection()
+                        init shouldBe InitConnectionProtocol.Connected
                         transport.send(WebSocketAddress("localhost", 8080), aMessage)
                         val msg = receiveDeserialized<RaftMessage>()
                         msg shouldBe aMessage
@@ -89,6 +100,7 @@ class KtorWebsocketTransportTest : FunSpec({
                 val received = CompletableDeferred<RaftMessage>()
                 val server = installServer(2) {
                     webSocket(path = "/raft/1") {
+                        send(Json.encodeToString(InitConnectionProtocol.Connected))
                         received.completeWith(
                             runCatching {
                                 val msg = incoming.receive()
@@ -110,6 +122,7 @@ class KtorWebsocketTransportTest : FunSpec({
                     val received = CompletableDeferred<RaftMessage>()
                     val server = installServer(2) {
                         webSocket(path = "/raft/1") {
+                            send(Json.encodeToString(InitConnectionProtocol.Connected))
                             runCatching { incoming.receive() }
                                 .map {
                                     Json.decodeFromString(
@@ -151,6 +164,11 @@ class KtorWebsocketTransportTest : FunSpec({
             }
     }
 })
+
+private suspend fun DefaultClientWebSocketSession.initConnection() =
+    incoming.receive()
+        .let { ByteArrayInputStream(it.readBytes()) }
+        .let { Json.decodeFromStream<InitConnectionProtocol>(it) }
 
 suspend fun HttpClient.connectWebSocket(node: Int, block: suspend DefaultClientWebSocketSession.() -> Unit) =
     webSocket("ws://localhost:${8080 + node}/raft/$node") {

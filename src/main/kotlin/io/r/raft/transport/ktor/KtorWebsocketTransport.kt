@@ -27,6 +27,7 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
@@ -35,6 +36,7 @@ import kotlinx.serialization.json.decodeFromStream
 import org.apache.logging.log4j.LogManager
 import org.apache.logging.log4j.Logger
 import java.io.ByteArrayInputStream
+import java.net.ConnectException
 import kotlin.coroutines.EmptyCoroutineContext
 
 data class WebSocketAddress(val host: String, val port: Int) : RaftMachine.RaftNode {
@@ -62,10 +64,16 @@ class KtorWebsocketTransport(val self: NodeId) : Transport<WebSocketAddress>, Au
 
     override suspend fun send(node: WebSocketAddress, message: RaftMessage) {
 //        log("sending_message", "from" to message.from, "to" to message.to, "message" to message)
-        runCatching {
+        try {
             val connection = raftGroup.get(message.to, node)
             connection.send(message)
-        }.onFailure { logger.error(entry("error_sending ${it.message}", "node" to message.to), it) }
+        }
+        catch (e: ConnectException) {
+            logger.warn("connect_exception: ${e.message}")
+        }
+        catch (e: Exception) {
+            logger.error(entry("unknown_error", "node" to message.to), e)
+        }
     }
 
     val webSocketHandler: suspend DefaultWebSocketServerSession.() -> Unit = {
@@ -76,10 +84,11 @@ class KtorWebsocketTransport(val self: NodeId) : Transport<WebSocketAddress>, Au
         when {
             raftNodeConnection == null -> {
                 connection.send(json.encodeToString(InitConnectionProtocol.AlreadyConnected))
-                connection.close(CloseReason(CloseReason.Codes.NORMAL, "Already connected"))
+                connection.close(CloseReason(CloseReason.Codes.CANNOT_ACCEPT, "Already connected"))
             }
             else -> {
                 connection.send(json.encodeToString(InitConnectionProtocol.Connected))
+                logger.info(entry("connected", "self" to self, "node" to name))
                 raftNodeConnection.job.collect { }
             }
         }
@@ -110,7 +119,7 @@ class KtorWebsocketTransport(val self: NodeId) : Transport<WebSocketAddress>, Au
         }
 
         override fun close() {
-            runCatching { connection.cancel() }
+            runCatching { connection.cancel("close raft connection") }
         }
     }
 
@@ -133,15 +142,22 @@ class KtorWebsocketTransport(val self: NodeId) : Transport<WebSocketAddress>, Au
                             peers[node] = it
                         }
 
-                        !result.isActive -> createClient(address).also {
-                            peers[node] = it
+                        !result.isActive -> {
+                            runCatching { result.close() }
+                                .onFailure { logger.warn("error_closing_stale_connection: ${it.message}") }
+                            createClient(address).also {
+                                peers[node] = it
+                            }
                         }
 
                         else -> result
                     }
                 }
             } catch (e: ClientAlreadyConnectedException) {
-                logger.info("retry_connection")
+                logger.info("retry_connection already connected")
+                get(node, address)
+            } catch (e: ClientInitConnectionTimeoutException) {
+                logger.info("retry_connection timeout")
                 get(node, address)
             }
         suspend fun addConnection(node: NodeId, connection: DefaultWebSocketSession): RaftNodeConnection? =
@@ -157,27 +173,34 @@ class KtorWebsocketTransport(val self: NodeId) : Transport<WebSocketAddress>, Au
 
 
         private suspend fun createClient(node: WebSocketAddress): RaftNodeConnection {
+            logger.info(entry("connecting", "self" to self, "node" to node, "address" to "${node.host}:${node.port}"))
             val connection = http.webSocketSession("ws://${node.host}:${node.port}/raft/${self}")
-            val response = connection.incoming
-                .receive()
-                .let { ByteArrayInputStream(it.readBytes()) }
-                .let { json.decodeFromStream<InitConnectionProtocol>(it) }
+            val response = withTimeoutOrNull(300){
+                connection.incoming
+                    .receive()
+                    .let { ByteArrayInputStream(it.readBytes()) }
+                    .let { json.decodeFromStream<InitConnectionProtocol>(it) }
+            } ?: throw ClientInitConnectionTimeoutException()
             if (response == InitConnectionProtocol.AlreadyConnected) {
                 connection.close(CloseReason(CloseReason.Codes.NORMAL, "Already connected"))
                 throw ClientAlreadyConnectedException()
             }
             return RaftNodeConnection(connection)
-                .also { scope.launch { it.job.collect { } } }
+                .also {
+                    logger.info(entry("connected", "self" to self, "node" to node))
+                    scope.launch { it.job.collect { } }
+                }
         }
 
         override fun close() {
             logger.info(entry("closing", "self" to self))
             runCatching { peers.forEach { (_, client) -> client.close() } }
-            runCatching { scope.cancel() }
+            runCatching { scope.cancel("close raft group") }
         }
     }
 
     private class ClientAlreadyConnectedException : Exception()
+    private class ClientInitConnectionTimeoutException : Exception()
 }
 @Serializable
 enum class InitConnectionProtocol {
