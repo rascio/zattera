@@ -1,7 +1,7 @@
 package io.r.raft
 
-import io.r.utils.arrow.Timeout
-import io.r.utils.arrow.timeout
+import io.r.utils.timeout.Timeout
+import io.r.utils.timeout.timeout
 
 interface Transport<NodeRef> {
 

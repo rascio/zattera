@@ -24,18 +24,25 @@ data class PeerState(
 
 @Serializable
 sealed interface RaftProtocol {
+
+    fun describe(): String
+
     @Serializable
     data class RequestVote(
         val term: Term,
         val candidateId: NodeId,
         val lastLog: LogEntryMetadata
-    ) : RaftProtocol
+    ) : RaftProtocol {
+        override fun describe(): String = "RequestVote(term=$term, candidateId=$candidateId, lastLog=$lastLog)"
+    }
 
     @Serializable
     data class RequestVoteResponse(
         val term: Term,
         val voteGranted: Boolean
-    ) : RaftProtocol
+    ) : RaftProtocol {
+        override fun describe(): String = "RequestVoteResponse(term=$term, voteGranted=$voteGranted)"
+    }
 
     @Serializable
     data class AppendEntries(
@@ -44,7 +51,10 @@ sealed interface RaftProtocol {
         val prevLog: LogEntryMetadata,
         val entries: List<LogEntry>,
         val leaderCommit: Long
-    ) : RaftProtocol
+    ) : RaftProtocol {
+        override fun describe(): String =
+            "AppendEntries(term=$term, leaderId=$leaderId, prevLog=$prevLog, entries=${entries.size}, leaderCommit=$leaderCommit)"
+    }
 
     @Serializable
     data class AppendEntriesResponse(
@@ -52,7 +62,9 @@ sealed interface RaftProtocol {
         val matchIndex: Index,
         val success: Boolean,
         val entries: Int
-    ) : RaftProtocol
+    ) : RaftProtocol {
+        override fun describe(): String = "AppendEntriesResponse(term=$term, matchIndex=$matchIndex, success=$success, entries=$entries)"
+    }
 }
 
 @Serializable

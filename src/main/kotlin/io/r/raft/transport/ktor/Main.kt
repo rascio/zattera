@@ -13,14 +13,12 @@ import io.ktor.server.response.respondText
 import io.ktor.server.routing.get
 import io.ktor.server.routing.post
 import io.ktor.server.routing.routing
-import io.ktor.server.websocket.WebSockets
-import io.ktor.server.websocket.webSocket
 import io.r.raft.RaftMachine
 import io.r.raft.persistence.inmemory.InMemoryPersistence
 import io.r.raft.persistence.utils.LoggingPersistence
 import io.r.raft.transport.utils.LoggingTransport
-import io.r.utils.arrow.Timeout
 import io.r.utils.logs.entry
+import io.r.utils.timeout.Timeout
 import kotlinx.coroutines.CoroutineName
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.coroutineScope
@@ -58,7 +56,7 @@ class TestWebSocketServer : Callable<String> {
     private var leaderJitter: Long = 50
 
     private fun String.toPeerId() = this.split("=").let { (id, address) ->
-        id to WebSocketAddress(address)
+        id to WebRestAddress(address)
     }
 
     override fun call(): String {
@@ -72,16 +70,17 @@ class TestWebSocketServer : Callable<String> {
     }
     private suspend fun ResourceScope.execute() = coroutineScope {
         val transport = install(
-            { KtorWebsocketTransport(id) },
+            { KtorRestTransport(id) },
             { it, _ -> it.close() }
         )
         val persistence = InMemoryPersistence()
         val raft = install(
             {
+                val peers1: Map<String, WebRestAddress> = peers.associate { it.toPeerId() }
                 RaftMachine(
-                    configuration = RaftMachine.Configuration<WebSocketAddress>(
+                    configuration = RaftMachine.Configuration<WebRestAddress>(
                         id = id,
-                        peers = peers.associate { it.toPeerId() },
+                        peers = peers1,
                         leaderElectionTimeout = Timeout(leaderTimeout).jitter(leaderJitter),
                         heartbeatTimeout = Timeout(heartbeatTimeout)
                     ),
@@ -95,7 +94,6 @@ class TestWebSocketServer : Callable<String> {
         val http = install(
             {
                 embeddedServer(Netty, port = port) {
-                    install(WebSockets)
                     install(CORS) {
                         anyHost()
                     }
@@ -104,7 +102,8 @@ class TestWebSocketServer : Callable<String> {
                         get("/healthcheck") {
                             call.respondText("Tutt'apposto")
                         }
-                        webSocket(path = "/raft/{node}", handler = transport.webSocketHandler)
+//                        webSocket(path = "/raft/{node}", handler = transport.webSocketHandler)
+                        raftEndpoints(transport)
                         post("/append") {
                             val entry = call.receive<ByteArray>()
                             runCatching {

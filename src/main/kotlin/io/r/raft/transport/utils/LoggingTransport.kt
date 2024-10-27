@@ -6,7 +6,7 @@ import io.r.raft.Transport
 import org.apache.logging.log4j.LogManager
 
 class LoggingTransport<NodeRef: RaftNode>(logTag: String, private val delegate: Transport<NodeRef>) : Transport<NodeRef> {
-    val logger = LogManager.getLogger("Transport.$logTag")
+    private val logger = LogManager.getLogger("Transport.$logTag")
     override suspend fun receive(): RaftMessage {
 //        log("Wait for message")
         val message = delegate.receive()

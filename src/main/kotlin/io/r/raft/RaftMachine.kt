@@ -3,7 +3,7 @@ package io.r.raft
 import arrow.core.continuations.AtomicRef
 import io.netty.util.internal.MacAddressUtil
 import io.r.raft.RaftMachine.RaftNode
-import io.r.utils.arrow.Timeout
+import io.r.utils.timeout.Timeout
 import io.r.utils.logs.entry
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
@@ -229,7 +229,9 @@ class RaftMachine<NodeRef : RaftNode>(
                                 beat(peer)
                             }
                             // Time has past, 'now' is not accurate anymore
-                            delay((now + configuration.heartbeatTimeout.millis) - System.currentTimeMillis())
+                            val waitTime = (now + configuration.heartbeatTimeout.millis) - System.currentTimeMillis()
+                            logger.debug("Next heartbeat for $peer in $waitTime ms")
+                            delay(waitTime)
                         }
                     }
                 }

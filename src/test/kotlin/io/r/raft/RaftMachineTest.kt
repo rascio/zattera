@@ -13,7 +13,7 @@ import io.r.raft.persistence.utils.LoggingPersistence
 import io.r.raft.transport.inmemory.InProcessTransport
 import io.r.raft.transport.inmemory.InProcessTransport.ChannelNodeRef
 import io.r.raft.transport.utils.LoggingTransport
-import io.r.utils.arrow.Timeout
+import io.r.utils.timeout.Timeout
 import io.r.utils.awaitility.await
 import io.r.utils.awaitility.coUntil
 import io.r.utils.awaitility.oneOf

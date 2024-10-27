@@ -1,4 +1,4 @@
-package io.r.utils.arrow
+package io.r.utils.timeout
 
 import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.withTimeout
