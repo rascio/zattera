@@ -5,6 +5,7 @@ import io.r.raft.LogEntry
 import io.r.raft.LogEntryMetadata
 import io.r.raft.NodeId
 import io.r.raft.Persistence
+import io.r.raft.Persistence.AppendResult
 import io.r.raft.ServerState
 import io.r.raft.Term
 import io.r.raft.encodeBase64
@@ -30,17 +31,6 @@ class InMemoryPersistence(
         var log: NavigableMap<Index, LogEntry> = TreeMap()
         var commitIndex: Index = 0L
         var lastApplied: Index = 0L
-
-        fun copy(block: State.() -> Unit = { }): State {
-            val copy = State()
-            copy.currentTerm = currentTerm
-            copy.votedFor = votedFor
-            copy.log = TreeMap(log)
-            copy.commitIndex = commitIndex
-            copy.lastApplied = lastApplied
-            copy.block()
-            return copy
-        }
 
         companion object {
             operator fun invoke(block: State.() -> Unit) = State().apply(block)
@@ -118,12 +108,13 @@ class InMemoryPersistence(
         state.lastApplied = toIndex
     }
 
-    override suspend fun append(entries: List<LogEntry>): Index = lock.withWriteLock {
+    override suspend fun append(entries: List<LogEntry>): AppendResult = lock.withWriteLock {
         val startFrom = state.log.size + 1L
         entries.forEachIndexed { index, entry ->
             state.log[startFrom + index] = entry
         }
         state.log.size.toLong()
+            .let { AppendResult.Success(it) }
     }
 
     /**
@@ -131,23 +122,28 @@ class InMemoryPersistence(
      * append should replace uncommitted entry
      * append should update the term
      */
-    override suspend fun append(term: Term, previous: LogEntryMetadata, entries: List<LogEntry>): Index? = when {
-        term < state.currentTerm -> null
-        previous.index > state.log.size.toLong() -> null
-        previous.index < 0L -> null
+    override suspend fun append(term: Term, previous: LogEntryMetadata, entries: List<LogEntry>): AppendResult = when {
+        term < state.currentTerm -> AppendResult.TermMismatch
+        previous.index > state.log.size.toLong() -> AppendResult.PreviousIndexNotFound
+        previous.index < 0L -> AppendResult.BadInput("Previous index must be greater than 0")
         else -> lock.withWriteLock {
             val previousEntryMetadata = when {
                 previous.index == 0L -> LogEntryMetadata.ZERO
-                else -> state.log[previous.index]?.let { LogEntryMetadata(previous.index, it.term) }
+                else -> state.log[previous.index]
+                    ?.let { LogEntryMetadata(previous.index, it.term) }
             }
-            takeUnless { previousEntryMetadata != previous }?.run {
-                val startFrom = previous.index + 1
-                state.log.apply { entries.forEachIndexed { index, e -> put(index + startFrom, e) } }
-                    .size
-                    .toLong()
+            when {
+                previousEntryMetadata == null -> AppendResult.PreviousIndexNotFound
+                previousEntryMetadata != previous -> AppendResult.PreviousIndexMismatch(expected = previous, actual = previousEntryMetadata)
+                else -> {
+                    val startFrom = previous.index + 1
+                    state.log.apply { entries.forEachIndexed { index, e -> put(index + startFrom, e) } }
+                        .size
+                        .toLong()
+                        .let { AppendResult.Success(it) }
+                }
             }
         }
-
     }
 
     override suspend fun voteFor(term: Term, nodeId: NodeId) = lock.withWriteLock {

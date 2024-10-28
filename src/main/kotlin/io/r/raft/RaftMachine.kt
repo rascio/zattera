@@ -2,6 +2,7 @@ package io.r.raft
 
 import arrow.core.continuations.AtomicRef
 import io.netty.util.internal.MacAddressUtil
+import io.r.raft.Persistence.AppendResult
 import io.r.raft.RaftMachine.RaftNode
 import io.r.utils.timeout.Timeout
 import io.r.utils.logs.entry
@@ -53,14 +54,16 @@ class RaftMachine<NodeRef : RaftNode>(
         require(isLeader) { "Only leader can send commands" }
         val now = System.currentTimeMillis()
         val term = persistence.getCurrentTerm()
-        val lastEntry = persistence.getLastEntryMetadata()
         val entries = commands.map { LogEntry(term, it) }
-        val index = persistence.append(term, lastEntry, entries) ?: error("Failed to append lastEntryMetadata=$lastEntry")
+        val result = persistence.append(entries)
+        if (result !is AppendResult.Success) {
+            error("Failed to append $result")
+        }
         lastAppendTime.set(now)
         logger.info(entry("command_sent", "term" to term, "commands" to entries))
 
         val onCommit = CompletableDeferred<Unit>()
-        waitingForCommit += WaitingCommit(index, onCommit)
+        waitingForCommit += WaitingCommit(result.index, onCommit)
         return onCommit
     }
 
@@ -129,17 +132,30 @@ class RaftMachine<NodeRef : RaftNode>(
                             persistence.setTerm(message.term)
                         }
                         val newIndex = persistence.append(message.term, message.prevLog, message.entries)
-                        val accepted = newIndex != null
-                        if (accepted) {
-                            persistence.commit(message.leaderCommit)
-                            releaseCommit(message.leaderCommit)
+                        val accepted: Boolean
+                        val matchIndex: Index
+                        val entriesSize: Int
+                        when (newIndex) {
+                            is AppendResult.Success -> {
+                                persistence.commit(message.leaderCommit)
+                                releaseCommit(message.leaderCommit)
+
+                                accepted = true
+                                matchIndex = newIndex.index
+                                entriesSize = message.entries.size
+                            }
+                            else -> {
+                                accepted = false
+                                matchIndex = -1
+                                entriesSize = -1
+                            }
                         }
                         received.from.send(
                             RaftProtocol.AppendEntriesResponse(
                                 term = persistence.getCurrentTerm(),
-                                matchIndex = newIndex ?: -1,
+                                matchIndex = matchIndex,
                                 success = accepted,
-                                entries = if (accepted) message.entries.size else -1
+                                entries = entriesSize
                             )
                         )
                         if (accepted && this !is Follower) {

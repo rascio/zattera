@@ -19,6 +19,7 @@ import io.r.utils.awaitility.coUntil
 import io.r.utils.awaitility.oneOf
 import io.r.utils.logs.entry
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
@@ -258,6 +259,7 @@ class RaftMachineTest : FunSpec({
                 )
 
                 // Append a command to the old leader
+                @Suppress("UNUSED_VARIABLE")
                 val oldLeaderCommitted = leader.stateMachine.command("TV Series: The Wire".encodeToByteArray())
                 // And a list of commands to the new leader
                 val newLeaderCommitted = newLeader.stateMachine
@@ -300,15 +302,21 @@ class RaftMachineTest : FunSpec({
             test("Test: Sequential Consistency") {
                 val messagePattern = Regex("([A-Z])-([0-9]+)")
                 cluster.reboot { }
-                val clients = 'A'..'G'
+                // C clients sending B batches of M messages each
+                val C = 8
+                val B = 15
+                val M = 3
+
+                val clients = 'A'..('A' + C)
                 coroutineScope {
-                    // 7 clients sending 3 batches of 4 messages each
                     val clientsSendingEntriesJob = launch {
                         clients.forEach { client ->
-                            launch {
-                                repeat(3) { b -> // batches
-                                    val messages = (1..4).map { "$client-${it * (b + 1)}" }
-                                    cluster.append(*messages.toTypedArray())
+                            launch(Dispatchers.IO) {
+                                repeat(B) { b -> // batches
+                                    val messages = (1..M).map { m ->
+                                        "$client-${m + (b * M)}"
+                                    }
+                                    cluster.append(messages)
                                 }
                             }
                         }
@@ -362,23 +370,25 @@ class RaftMachineTest : FunSpec({
 
 class RaftTestCluster(val nodes: List<RaftTestNode>) {
 
-    val logger: Logger = LogManager.getLogger(RaftTestCluster::class.java)
+    private val logger: Logger = LogManager.getLogger(RaftTestCluster::class.java)
 
     suspend fun append(vararg commands: String) = append(commands.toList())
     suspend fun append(commands: List<String>): Unit = coroutineScope {
-        nodes.asSequence()
-            .filter { r -> r.stateMachine.isLeader }
-            .forEach { r ->
-                launch {
-                    try {
-                        r.stateMachine.command(commands.map { it.encodeToByteArray() }).await()
-                    } catch (e: CancellationException) {
-                        if (e.message == "Role has changed") {
-                            delay(30)
-                            append(commands)
-                        }
+        nodes.firstOrNull { r -> r.stateMachine.isLeader }
+            ?.let { leader ->
+                try {
+                    leader.stateMachine.command(commands.map { it.encodeToByteArray() })
+                        .join()
+                } catch (e: Exception) {
+                    when (e.message) {
+                        "Role has changed" -> null
+                        "Only leader can send commands" -> null
+                        else -> throw e
                     }
                 }
+            } ?: run {
+                delay(30)
+                append(commands)
             }
     }
 

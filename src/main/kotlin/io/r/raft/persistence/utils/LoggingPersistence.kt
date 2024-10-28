@@ -40,7 +40,7 @@ class LoggingPersistence(
         }
     }
 
-    override suspend fun append(entries: List<LogEntry>): Index? {
+    override suspend fun append(entries: List<LogEntry>): Persistence.AppendResult {
         return delegate.append(entries).also { index ->
             if (entries.isNotEmpty())
                 logger.info(

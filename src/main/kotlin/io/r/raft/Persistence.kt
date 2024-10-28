@@ -14,16 +14,24 @@ interface Persistence {
     suspend fun incrementTermAndVote(id: NodeId)
     suspend fun setTerm(term: Term)
     suspend fun voteFor(term: Term, nodeId: NodeId)
-    suspend fun append(term: Term, previous: LogEntryMetadata, entries: List<LogEntry>): Index?
+
+    sealed class AppendResult {
+        data class Success(val index: Index) : AppendResult()
+        object TermMismatch : AppendResult()
+        object PreviousIndexNotFound : AppendResult()
+        data class PreviousIndexMismatch(val expected: LogEntryMetadata, val actual: LogEntryMetadata) : AppendResult()
+        data class BadInput(val reason: String) : AppendResult()
+    }
+    suspend fun append(term: Term, previous: LogEntryMetadata, entries: List<LogEntry>): AppendResult
     suspend fun commit(upTo: Index)
     suspend fun apply(upTo: Index)
 
     // Defaults
     suspend fun getLog(index: Index): LogEntry? =
         getLogs(index, 1).firstOrNull()
-    suspend fun append(entries: List<LogEntry>): Index? =
+    suspend fun append(entries: List<LogEntry>): AppendResult =
         append(getCurrentTerm(), getLastEntryMetadata(), entries)
-    suspend fun append(entry: LogEntry): Index? =
+    suspend fun append(entry: LogEntry): AppendResult =
         append(listOf(entry))
     suspend fun isUpToDate(append: RaftProtocol.AppendEntries) =
         append.term >= getCurrentTerm()

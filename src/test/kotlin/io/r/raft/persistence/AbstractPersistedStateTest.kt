@@ -6,6 +6,7 @@ import io.r.raft.Index
 import io.r.raft.LogEntry
 import io.r.raft.LogEntryMetadata
 import io.r.raft.Persistence
+import io.r.raft.Persistence.AppendResult
 
 interface PersistedStateTestAdapter {
     suspend fun createPersistedState(): Persistence
@@ -93,7 +94,7 @@ abstract class AbstractPersistedStateTest(
 
         test("Append") {
             val index = persistedState.append(firstEntry)
-            index shouldBe 1
+            index shouldBe AppendResult.Success(1)
             persistedState.getLogs(0,1) shouldBe emptyList()
             persistedState.getLogs(1,1) shouldBe listOf(firstEntry)
             persistedState.getLogs(0,2) shouldBe listOf(firstEntry)
@@ -129,7 +130,7 @@ abstract class AbstractPersistedStateTest(
         }
         test("Append second entry") {
             val index = persistedState.append(secondEntry)
-            index shouldBe 2
+            index shouldBe AppendResult.Success(2)
             persistedState.getLogs(0, 1) shouldBe emptyList()
             persistedState.getLogs(0, 2) shouldBe listOf(firstEntry)
             persistedState.getLogs(1, 2) shouldBe listOf(firstEntry, secondEntry)
@@ -171,7 +172,7 @@ abstract class AbstractPersistedStateTest(
         }
         test("Append multiple entries") {
             val index = persistedState.append(listOf(thirdEntry, fourthEntry))
-            index shouldBe 4
+            index shouldBe AppendResult.Success(4)
             persistedState.getLogs(0, 4) shouldBe listOf(firstEntry, secondEntry, thirdEntry)
             assertLogIsConsistent(4)
             persistedState.getLogs(2, 10) shouldBe listOf(secondEntry, thirdEntry, fourthEntry)
@@ -231,23 +232,24 @@ abstract class AbstractPersistedStateTest(
         val fifthEntryMetadata = LogEntryMetadata(5, 3)
 
         test("append should reject when term is lower") {
-            persistedState.append(2, fifthEntryMetadata, listOf(fifthEntry)) shouldBe null
+            persistedState.append(2, fifthEntryMetadata, listOf(fifthEntry)) shouldBe AppendResult.TermMismatch
             persistedState.getLogs(0, 5) shouldBe listOf(firstEntry, secondEntry, thirdEntry, fourthEntry)
         }
 
         test("append should reject when previous entry does not match") {
             // entry: index is larger than log size
-            persistedState.append(3, fifthEntryMetadata, listOf(entryToBeReplaced)) shouldBe null
+            persistedState.append(3, fifthEntryMetadata, listOf(entryToBeReplaced)) shouldBe AppendResult.PreviousIndexNotFound
             // entry: term for index not matching
-            persistedState.append(3, fourthEntryMetadata.copy(term = fourthEntryMetadata.term - 1), listOf(entryToBeReplaced)) shouldBe null
+            val notMatchingMetadata = fourthEntryMetadata.copy(term = fourthEntryMetadata.term - 1)
+            persistedState.append(3, notMatchingMetadata, listOf(entryToBeReplaced)) shouldBe AppendResult.PreviousIndexMismatch(notMatchingMetadata, fourthEntryMetadata)
             persistedState.getLogs(1, 5) shouldBe listOf(firstEntry, secondEntry, thirdEntry, fourthEntry)
         }
 
         test("append should replace uncommitted entry") {
-            persistedState.append(3, fourthEntryMetadata, listOf(entryToBeReplaced)) shouldBe 5
+            persistedState.append(3, fourthEntryMetadata, listOf(entryToBeReplaced)) shouldBe AppendResult.Success(5)
             persistedState.getLogs(1, 5) shouldBe listOf(firstEntry, secondEntry, thirdEntry, fourthEntry, entryToBeReplaced)
 
-            persistedState.append(3, fourthEntryMetadata, listOf(fifthEntry)) shouldBe 5
+            persistedState.append(3, fourthEntryMetadata, listOf(fifthEntry)) shouldBe AppendResult.Success(5)
             persistedState.getLogs(1, 5) shouldBe listOf(firstEntry, secondEntry, thirdEntry, fourthEntry, fifthEntry)
         }
     }
