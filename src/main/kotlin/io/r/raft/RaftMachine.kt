@@ -223,15 +223,12 @@ class RaftMachine<NodeRef : RaftNode>(
                         latch.countDown()
                         while (isActive) {
                             val lastPeerContactedTime = peers[peer]?.lastContactTime ?: Long.MIN_VALUE
-                            val nextHeartBeatTime = lastPeerContactedTime + configuration.heartbeatTimeout.millis
+                            val nextHeartBeatTime = lastPeerContactedTime + (configuration.heartbeatTimeout.millis * 0.9)
                             val now = System.currentTimeMillis()
                             if (nextHeartBeatTime <= now) {
                                 beat(peer)
                             }
-                            // Time has past, 'now' is not accurate anymore
-                            val waitTime = (now + configuration.heartbeatTimeout.millis) - System.currentTimeMillis()
-                            logger.debug("Next heartbeat for $peer in $waitTime ms")
-                            delay(waitTime)
+                            delay(configuration.heartbeatTimeout.millis)
                         }
                     }
                 }
