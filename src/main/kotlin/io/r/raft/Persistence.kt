@@ -6,6 +6,7 @@ interface Persistence {
     // Queries
     suspend fun getServerState(): ServerState
     suspend fun getCurrentTerm(): Term
+    suspend fun getCommitIndex(): Index = getServerState().commitIndex
     suspend fun getLogMetadata(index: Index): LogEntryMetadata?
     suspend fun getLastEntryMetadata(): LogEntryMetadata
     suspend fun getLogs(from: Index, size: Int): List<LogEntry>

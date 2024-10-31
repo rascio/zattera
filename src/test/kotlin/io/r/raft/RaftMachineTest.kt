@@ -267,9 +267,7 @@ class RaftMachineTest : FunSpec({
                 "await_old_leader_appended"
                     .await coUntil { leader.persistence.getLastEntryMetadata().index == firstCmdIndex + 1 }
 
-                withTimeout(3.seconds) {
-                    newLeaderCommitted.join()
-                }
+                withTimeout(3.seconds) { newLeaderCommitted.join() }
                 logger.info("message_replicated_2_out_of_3")
 
                 logger.info("fix_old_leader")

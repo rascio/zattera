@@ -27,6 +27,7 @@ import org.apache.logging.log4j.Logger
 import java.util.concurrent.ConcurrentLinkedQueue
 import java.util.concurrent.CountDownLatch
 import kotlin.math.ceil
+import kotlin.math.min
 
 class RaftMachine<NodeRef : RaftNode>(
     private val configuration: Configuration<NodeRef>,
@@ -116,6 +117,7 @@ class RaftMachine<NodeRef : RaftNode>(
                 val serverState = persistence.getServerState()
                 if (serverState.commitIndex > serverState.lastApplied) {
                     persistence.apply(serverState.commitIndex)
+                    releaseCommit(serverState.commitIndex)
                 }
                 val received = when (this) {
                     is Leader -> transport.receive()
@@ -131,17 +133,17 @@ class RaftMachine<NodeRef : RaftNode>(
                         if (message.term > persistence.getCurrentTerm()) {
                             persistence.setTerm(message.term)
                         }
-                        val newIndex = persistence.append(message.term, message.prevLog, message.entries)
+                        val appendResult = persistence.append(message.term, message.prevLog, message.entries)
                         val accepted: Boolean
                         val matchIndex: Index
                         val entriesSize: Int
-                        when (newIndex) {
+                        when (appendResult) {
                             is AppendResult.Success -> {
                                 persistence.commit(message.leaderCommit)
                                 releaseCommit(message.leaderCommit)
 
                                 accepted = true
-                                matchIndex = newIndex.index
+                                matchIndex = appendResult.index
                                 entriesSize = message.entries.size
                             }
                             else -> {
@@ -170,9 +172,11 @@ class RaftMachine<NodeRef : RaftNode>(
                                 return RaftRole.FOLLOWER
                             }
                             updatePeerMetadata(received.from, message)
-                            if (message.success && hasQuorum(message.matchIndex)) {
-                                persistence.commit(message.matchIndex)
-                                releaseCommit(message.matchIndex)
+                            if (message.success) {
+                                val quorum = getQuorum()
+                                if (quorum != null) {
+                                    persistence.commit(quorum)
+                                }
                             }
                             getNextBatch(received.from, message)?.let { (prev, entries) ->
                                 received.from.send(
@@ -211,8 +215,12 @@ class RaftMachine<NodeRef : RaftNode>(
                         }
                     }
 
-                    is RaftProtocol.RequestVoteResponse -> {
-                        if (this is Candidate && voteReceived(received.from, message.voteGranted)) {
+                    is RaftProtocol.RequestVoteResponse -> when {
+                        message.term > persistence.getCurrentTerm() -> {
+                            persistence.setTerm(message.term)
+                            return RaftRole.FOLLOWER
+                        }
+                        this is Candidate && wonElection(received.from, message.voteGranted) -> {
                             return RaftRole.LEADER
                         }
                     }
@@ -286,6 +294,24 @@ class RaftMachine<NodeRef : RaftNode>(
             }
         }
 
+        suspend fun getQuorum(): Index? {
+            val currentTerm = persistence.getCurrentTerm()
+
+            for (index in (persistence.getCommitIndex() + 1..persistence.getLastEntryMetadata().index)) {
+                if (currentTerm != persistence.getLogMetadata(index)?.term) {
+                    continue
+                }
+                var count = 1
+                for (peer in peers) {
+                    count++
+                    if (count >= configuration.quorum) {
+                        return index
+                    }
+                }
+            }
+            return null
+        }
+
         suspend fun hasQuorum(index: Index): Boolean {
 //            log(
 //                "Quorum check",
@@ -329,7 +355,7 @@ class RaftMachine<NodeRef : RaftNode>(
             }
         }
 
-        fun voteReceived(from: NodeId, voteGranted: Boolean): Boolean {
+        fun wonElection(from: NodeId, voteGranted: Boolean): Boolean {
             if (voteGranted) {
                 receivedVotes += from
             }
