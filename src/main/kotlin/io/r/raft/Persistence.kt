@@ -18,8 +18,8 @@ interface Persistence {
 
     sealed class AppendResult {
         data class Success(val index: Index) : AppendResult()
-        object TermMismatch : AppendResult()
-        object PreviousIndexNotFound : AppendResult()
+        data object TermMismatch : AppendResult()
+        data object PreviousIndexNotFound : AppendResult()
         data class PreviousIndexMismatch(val expected: LogEntryMetadata, val actual: LogEntryMetadata) : AppendResult()
         data class BadInput(val reason: String) : AppendResult()
     }

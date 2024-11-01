@@ -1,6 +1,7 @@
 package io.r.raft
 
 import kotlinx.serialization.Serializable
+import java.util.UUID
 
 typealias Term = Long
 typealias NodeId = String
@@ -25,20 +26,22 @@ data class PeerState(
 @Serializable
 sealed interface RaftProtocol {
 
+    val term: Term
+
     fun describe(): String
 
     @Serializable
     data class RequestVote(
-        val term: Term,
+        override val term: Term,
         val candidateId: NodeId,
         val lastLog: LogEntryMetadata
     ) : RaftProtocol {
-        override fun describe(): String = "RequestVote(term=$term, candidateId=$candidateId, lastLog=$lastLog)"
+        override fun describe(): String = "RequestVote(term=$term, candidateId=$candidateId, lastLog=${lastLog.index}:${lastLog.term})"
     }
 
     @Serializable
     data class RequestVoteResponse(
-        val term: Term,
+        override val term: Term,
         val voteGranted: Boolean
     ) : RaftProtocol {
         override fun describe(): String = "RequestVoteResponse(term=$term, voteGranted=$voteGranted)"
@@ -46,31 +49,31 @@ sealed interface RaftProtocol {
 
     @Serializable
     data class AppendEntries(
-        val term: Term,
+        override val term: Term,
         val leaderId: NodeId,
         val prevLog: LogEntryMetadata,
         val entries: List<LogEntry>,
         val leaderCommit: Long
     ) : RaftProtocol {
         override fun describe(): String =
-            "AppendEntries(term=$term, leaderId=$leaderId, prevLog=$prevLog, entries=${entries.size}, leaderCommit=$leaderCommit)"
+            "AppendEntries(term=$term, prev=${prevLog.index}:${prevLog.term}, e=${entries.size}, lc=$leaderCommit)"
     }
 
     @Serializable
     data class AppendEntriesResponse(
-        val term: Term,
+        override val term: Term,
         val matchIndex: Index,
         val success: Boolean,
         val entries: Int
     ) : RaftProtocol {
-        override fun describe(): String = "AppendEntriesResponse(term=$term, matchIndex=$matchIndex, success=$success, entries=$entries)"
+        override fun describe(): String = "AppendEntriesResponse(term=$term, match=$matchIndex, s=$success, e=$entries)"
     }
 }
 
 @Serializable
-data class LogEntry(val term: Term, val command: ByteArray) {
+data class LogEntry(val term: Term, val command: ByteArray, val id: String = UUID.randomUUID().toString()) {
 
-    override fun toString(): String = "LogEntry(term=$term, command=${command.encodeBase64()})"
+    override fun toString(): String = "LogEntry(term=$term, c=${command.encodeBase64()})"
 
     override fun equals(other: Any?): Boolean {
         if (this === other) return true
