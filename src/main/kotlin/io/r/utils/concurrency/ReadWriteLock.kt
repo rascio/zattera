@@ -2,6 +2,7 @@ package io.r.utils.concurrency
 
 import kotlinx.coroutines.sync.Mutex
 
+// https://greenteapress.com/semaphores/LittleBookOfSemaphores.pdf 4.2.2
 class ReadWriteLock {
     private val lightswitch = Lightswitch()
     private val write = Mutex()

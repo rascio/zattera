@@ -2,6 +2,9 @@ package io.r.raft
 
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.matchers.shouldBe
+import io.r.raft.protocol.LogEntryMetadata
+import io.r.raft.protocol.RaftMessage
+import io.r.raft.protocol.RaftRpc
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
@@ -15,7 +18,7 @@ class ProtocolTest : FunSpec({
             val message = RaftMessage(
                 from = "1",
                 to = "1",
-                rpc = RaftProtocol.RequestVote(
+                rpc = RaftRpc.RequestVote(
                     term = 0,
                     candidateId = "1",
                     lastLog = LogEntryMetadata(0, 0)
@@ -29,7 +32,7 @@ class ProtocolTest : FunSpec({
             val message = RaftMessage(
                 from = "1",
                 to = "1",
-                rpc = RaftProtocol.RequestVoteResponse(
+                rpc = RaftRpc.RequestVoteResponse(
                     term = 0,
                     voteGranted = true
                 )
@@ -42,7 +45,7 @@ class ProtocolTest : FunSpec({
             val message = RaftMessage(
                 from = "1",
                 to = "1",
-                rpc = RaftProtocol.AppendEntries(
+                rpc = RaftRpc.AppendEntries(
                     term = 0,
                     leaderId = "1",
                     prevLog = LogEntryMetadata(0, 0),
@@ -58,7 +61,7 @@ class ProtocolTest : FunSpec({
             val message = RaftMessage(
                 from = "1",
                 to = "1",
-                rpc = RaftProtocol.AppendEntriesResponse(
+                rpc = RaftRpc.AppendEntriesResponse(
                     term = 0,
                     success = true,
                     matchIndex = 0,

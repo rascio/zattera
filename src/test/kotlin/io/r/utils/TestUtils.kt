@@ -1,9 +1,9 @@
 package io.r.utils
 
-import io.r.raft.Index
-import io.r.raft.LogEntry
-import io.r.raft.LogEntryMetadata
-import io.r.raft.Term
+import io.r.raft.protocol.Index
+import io.r.raft.protocol.LogEntry
+import io.r.raft.protocol.LogEntryMetadata
+import io.r.raft.protocol.Term
 
 
 fun meta(index: Index, term: Term) = LogEntryMetadata(index, term)

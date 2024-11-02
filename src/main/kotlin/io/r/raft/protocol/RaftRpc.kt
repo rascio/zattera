@@ -1,30 +1,13 @@
-package io.r.raft
+package io.r.raft.protocol
 
 import kotlinx.serialization.Serializable
-import java.util.UUID
 
 typealias Term = Long
 typealias NodeId = String
 typealias Index = Long
 
-enum class RaftRole {
-    FOLLOWER,
-    CANDIDATE,
-    LEADER
-}
-
-interface ServerState {
-    val commitIndex: Index
-    val lastApplied: Index
-}
-data class PeerState(
-    val nextIndex: Index,
-    val matchIndex: Index,
-    val lastContactTime: Long = Long.MIN_VALUE
-)
-
 @Serializable
-sealed interface RaftProtocol {
+sealed interface RaftRpc {
 
     val term: Term
 
@@ -35,7 +18,7 @@ sealed interface RaftProtocol {
         override val term: Term,
         val candidateId: NodeId,
         val lastLog: LogEntryMetadata
-    ) : RaftProtocol {
+    ) : RaftRpc {
         override fun describe(): String = "RequestVote(term=$term, candidateId=$candidateId, lastLog=${lastLog.index}:${lastLog.term})"
     }
 
@@ -43,7 +26,7 @@ sealed interface RaftProtocol {
     data class RequestVoteResponse(
         override val term: Term,
         val voteGranted: Boolean
-    ) : RaftProtocol {
+    ) : RaftRpc {
         override fun describe(): String = "RequestVoteResponse(term=$term, voteGranted=$voteGranted)"
     }
 
@@ -54,7 +37,7 @@ sealed interface RaftProtocol {
         val prevLog: LogEntryMetadata,
         val entries: List<LogEntry>,
         val leaderCommit: Long
-    ) : RaftProtocol {
+    ) : RaftRpc {
         override fun describe(): String =
             "AppendEntries(term=$term, prev=${prevLog.index}:${prevLog.term}, e=${entries.size}, lc=$leaderCommit)"
     }
@@ -65,38 +48,7 @@ sealed interface RaftProtocol {
         val matchIndex: Index,
         val success: Boolean,
         val entries: Int
-    ) : RaftProtocol {
+    ) : RaftRpc {
         override fun describe(): String = "AppendEntriesResponse(term=$term, match=$matchIndex, s=$success, e=$entries)"
     }
 }
-
-@Serializable
-data class LogEntry(val term: Term, val command: ByteArray, val id: String = UUID.randomUUID().toString()) {
-
-    override fun toString(): String = "LogEntry(term=$term, c=${command.encodeBase64()})"
-
-    override fun equals(other: Any?): Boolean {
-        if (this === other) return true
-        if (javaClass != other?.javaClass) return false
-
-        other as LogEntry
-
-        if (term != other.term) return false
-        if (!command.contentEquals(other.command)) return false
-
-        return true
-    }
-
-    override fun hashCode(): Int {
-        var result = term.hashCode()
-        result = 31 * result + command.contentHashCode()
-        return result
-    }
-}
-
-@Serializable
-data class RaftMessage(
-    val from: NodeId,
-    val to: NodeId,
-    val rpc: RaftProtocol
-)

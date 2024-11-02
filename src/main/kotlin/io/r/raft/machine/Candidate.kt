@@ -1,10 +1,10 @@
 package io.r.raft.machine
 
-import io.r.raft.Index
-import io.r.raft.NodeId
-import io.r.raft.RaftMessage
-import io.r.raft.RaftProtocol
-import io.r.raft.RaftRole
+import io.r.raft.protocol.Index
+import io.r.raft.protocol.NodeId
+import io.r.raft.protocol.RaftMessage
+import io.r.raft.protocol.RaftRpc
+import io.r.raft.protocol.RaftRole
 import io.r.raft.log.RaftLog
 import io.r.raft.transport.RaftClusterNode
 import io.r.raft.transport.RaftClusterNode.Companion.quorum
@@ -32,7 +32,7 @@ class Candidate(
         clusterNode.peers.forEach { peer ->
             clusterNode.send(
                 peer,
-                RaftProtocol.RequestVote(
+                RaftRpc.RequestVote(
                     log.getTerm(),
                     clusterNode.id,
                     checkNotNull(log.getMetadata(lastIndex)) { "Metadata for lastIndex must always be available" }
@@ -44,7 +44,7 @@ class Candidate(
     override suspend fun onReceivedMessage(message: RaftMessage) {
         require(message.rpc.term <= log.getTerm()) { "Candidate received message with higher term" }
         when (message.rpc) {
-            is RaftProtocol.RequestVoteResponse -> {
+            is RaftRpc.RequestVoteResponse -> {
                 if (message.rpc.voteGranted) {
                     votesReceived += message.from
                     logger.debug(entry("Received_Vote", "from" to message.from, "votes" to votesReceived.size, "quorum" to floor(clusterNode.peers.size / 2.0)))
@@ -53,14 +53,14 @@ class Candidate(
                     }
                 }
             }
-            is RaftProtocol.AppendEntries -> {
+            is RaftRpc.AppendEntries -> {
                 changeRole(RaftRole.FOLLOWER)
                     .onReceivedMessage(message)
             }
-            is RaftProtocol.RequestVote -> {
+            is RaftRpc.RequestVote -> {
                 clusterNode.send(
                     message.from,
-                    RaftProtocol.RequestVoteResponse(
+                    RaftRpc.RequestVoteResponse(
                         term = log.getTerm(),
                         voteGranted = false
                     )

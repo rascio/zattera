@@ -2,12 +2,12 @@ package io.r.raft.machine
 
 import arrow.fx.coroutines.resourceScope
 import io.kotest.core.spec.style.FunSpec
-import io.r.raft.LogEntryMetadata
-import io.r.raft.RaftMessage
-import io.r.raft.RaftProtocol
-import io.r.raft.RaftProtocol.AppendEntries
-import io.r.raft.RaftProtocol.AppendEntriesResponse
-import io.r.raft.RaftRole
+import io.r.raft.protocol.LogEntryMetadata
+import io.r.raft.protocol.RaftMessage
+import io.r.raft.protocol.RaftRpc
+import io.r.raft.protocol.RaftRpc.AppendEntries
+import io.r.raft.protocol.RaftRpc.AppendEntriesResponse
+import io.r.raft.protocol.RaftRole
 import io.r.raft.log.RaftLog.Companion.getLastMetadata
 import io.r.raft.test.RaftLogBuilderScope.Companion.raftLog
 import io.r.raft.test.shouldReceive
@@ -54,7 +54,7 @@ class FollowerTest : FunSpec({
                         RaftMessage(
                             from = "N1",
                             to = "UnderTest",
-                            rpc = RaftProtocol.RequestVote(
+                            rpc = RaftRpc.RequestVote(
                                 term = electionTerm,
                                 candidateId = "N1",
                                 lastLog = log.getLastMetadata()
@@ -64,7 +64,7 @@ class FollowerTest : FunSpec({
                     N1 shouldReceive RaftMessage(
                         from = "UnderTest",
                         to = "N1",
-                        rpc = RaftProtocol.RequestVoteResponse(
+                        rpc = RaftRpc.RequestVoteResponse(
                             term = electionTerm,
                             voteGranted = true
                         )
@@ -77,7 +77,7 @@ class FollowerTest : FunSpec({
                         RaftMessage(
                             from = "N2",
                             to = "UnderTest",
-                            rpc = RaftProtocol.RequestVote(
+                            rpc = RaftRpc.RequestVote(
                                 term = electionTerm,
                                 candidateId = "N2",
                                 lastLog = log.getLastMetadata()
@@ -87,7 +87,7 @@ class FollowerTest : FunSpec({
                     N2 shouldReceive RaftMessage(
                         from = "UnderTest",
                         to = "N2",
-                        rpc = RaftProtocol.RequestVoteResponse(
+                        rpc = RaftRpc.RequestVoteResponse(
                             term = electionTerm,
                             voteGranted = false
                         )

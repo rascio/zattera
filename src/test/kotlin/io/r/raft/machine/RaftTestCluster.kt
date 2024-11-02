@@ -1,8 +1,8 @@
 package io.r.raft.machine
 
 import arrow.fx.coroutines.ResourceScope
-import io.r.raft.NodeId
-import io.r.raft.RaftRole
+import io.r.raft.protocol.NodeId
+import io.r.raft.protocol.RaftRole
 import io.r.utils.awaitility.await
 import io.r.utils.awaitility.coUntilNotNull
 import io.r.utils.awaitility.timeout

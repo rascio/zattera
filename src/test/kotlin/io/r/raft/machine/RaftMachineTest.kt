@@ -7,11 +7,11 @@ import io.kotest.matchers.comparables.shouldBeGreaterThan
 import io.kotest.matchers.comparables.shouldBeLessThan
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.shouldNotBe
-import io.r.raft.LogEntryMetadata
-import io.r.raft.RaftMessage
-import io.r.raft.RaftProtocol
-import io.r.raft.RaftProtocol.AppendEntries
-import io.r.raft.RaftProtocol.AppendEntriesResponse
+import io.r.raft.protocol.LogEntryMetadata
+import io.r.raft.protocol.RaftMessage
+import io.r.raft.protocol.RaftRpc
+import io.r.raft.protocol.RaftRpc.AppendEntries
+import io.r.raft.protocol.RaftRpc.AppendEntriesResponse
 import io.r.raft.test.installCoroutine
 import io.r.raft.transport.RaftClusterNode
 import io.r.utils.awaitility.await
@@ -70,11 +70,11 @@ class RaftMachineTest : FunSpec({
 
             context("A node in Follower state") {
                 test("should grant the vote when receiving an updated RequestVote") {
-                    N1.sendTo(underTest) { RaftProtocol.RequestVote(1L, "N1", LogEntryMetadata.ZERO) }
+                    N1.sendTo(underTest) { RaftRpc.RequestVote(1L, "N1", LogEntryMetadata.ZERO) }
                     N1 shouldReceive RaftMessage(
                         from = underTest.id,
                         to = N1.id,
-                        rpc = RaftProtocol.RequestVoteResponse(term = 1L, voteGranted = true)
+                        rpc = RaftRpc.RequestVoteResponse(term = 1L, voteGranted = true)
                     )
                 }
                 test("should reply false when the term is smaller") {
@@ -125,12 +125,12 @@ class RaftMachineTest : FunSpec({
                     N1 shouldReceive RaftMessage(
                         underTest.id,
                         N1.id,
-                        RaftProtocol.RequestVote(1L, underTest.id, LogEntryMetadata.ZERO)
+                        RaftRpc.RequestVote(1L, underTest.id, LogEntryMetadata.ZERO)
                     )
                     N2 shouldReceive RaftMessage(
                         underTest.id,
                         N2.id,
-                        RaftProtocol.RequestVote(1L, underTest.id, LogEntryMetadata.ZERO)
+                        RaftRpc.RequestVote(1L, underTest.id, LogEntryMetadata.ZERO)
                     )
                 }
             }
@@ -143,16 +143,16 @@ class RaftMachineTest : FunSpec({
                     N1 shouldReceive RaftMessage(
                         underTest.id,
                         N1.id,
-                        RaftProtocol.RequestVote(1L, underTest.id, LogEntryMetadata.ZERO)
+                        RaftRpc.RequestVote(1L, underTest.id, LogEntryMetadata.ZERO)
                     )
                     N1.sendTo(underTest) {
-                        RaftProtocol.RequestVote(
+                        RaftRpc.RequestVote(
                             1L,
                             N1.id,
                             LogEntryMetadata.ZERO
                         )
                     }
-                    N1.receive() shouldBe RaftMessage(underTest.id, N1.id, RaftProtocol.RequestVoteResponse(1L, false))
+                    N1.receive() shouldBe RaftMessage(underTest.id, N1.id, RaftRpc.RequestVoteResponse(1L, false))
                 }
             }
         }
@@ -451,7 +451,7 @@ class RaftMachineTest : FunSpec({
 /**
  * Make the [RaftTestNode] receive a message from the [RaftClusterNode]
  */
-suspend fun RaftClusterNode.sendTo(to: RaftTestNode, rpc: () -> RaftProtocol) {
+suspend fun RaftClusterNode.sendTo(to: RaftTestNode, rpc: () -> RaftRpc) {
     send(to.id, rpc())
 }
 

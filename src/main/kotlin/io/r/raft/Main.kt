@@ -18,6 +18,8 @@ import io.ktor.server.routing.routing
 import io.r.raft.log.StateMachine
 import io.r.raft.log.inmemory.InMemoryRaftLog
 import io.r.raft.machine.RaftMachine
+import io.r.raft.protocol.Index
+import io.r.raft.protocol.LogEntry
 import io.r.raft.transport.ktor.KtorRestRaftClusterNode
 import io.r.raft.transport.utils.LoggingRaftClusterNode
 import io.r.utils.logs.entry

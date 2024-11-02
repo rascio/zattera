@@ -1,10 +1,10 @@
 package io.r.raft.machine
 
-import io.r.raft.Index
-import io.r.raft.NodeId
-import io.r.raft.RaftMessage
-import io.r.raft.RaftProtocol
-import io.r.raft.RaftRole
+import io.r.raft.protocol.Index
+import io.r.raft.protocol.NodeId
+import io.r.raft.protocol.RaftMessage
+import io.r.raft.protocol.RaftRpc
+import io.r.raft.protocol.RaftRole
 import io.r.raft.log.RaftLog
 import io.r.raft.transport.RaftClusterNode
 
@@ -20,7 +20,7 @@ sealed class Role {
     open suspend fun onReceivedMessage(message: RaftMessage) { }
     open suspend fun onTimeout() { }
 
-    suspend fun NodeId.send(message: RaftProtocol) {
+    suspend fun NodeId.send(message: RaftRpc) {
         clusterNode.send(this, message)
     }
 }

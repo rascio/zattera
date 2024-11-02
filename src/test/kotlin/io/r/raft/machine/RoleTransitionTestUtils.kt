@@ -1,7 +1,7 @@
 package io.r.raft.machine
 
 import io.mockk.mockk
-import io.r.raft.RaftRole
+import io.r.raft.protocol.RaftRole
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.channels.ReceiveChannel
 

@@ -2,10 +2,10 @@ package io.r.raft.log
 
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.matchers.shouldBe
-import io.r.raft.LogEntry
-import io.r.raft.LogEntryMetadata
-import io.r.raft.NodeId
-import io.r.raft.Term
+import io.r.raft.protocol.LogEntry
+import io.r.raft.protocol.LogEntryMetadata
+import io.r.raft.protocol.NodeId
+import io.r.raft.protocol.Term
 import io.r.utils.entry
 import kotlin.random.Random
 

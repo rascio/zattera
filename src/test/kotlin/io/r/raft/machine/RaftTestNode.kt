@@ -1,9 +1,9 @@
 package io.r.raft.machine
 
-import io.r.raft.Index
-import io.r.raft.LogEntry
-import io.r.raft.LogEntryMetadata
-import io.r.raft.NodeId
+import io.r.raft.protocol.Index
+import io.r.raft.protocol.LogEntry
+import io.r.raft.protocol.LogEntryMetadata
+import io.r.raft.protocol.NodeId
 import io.r.raft.log.RaftLog
 import io.r.raft.log.StateMachine
 import io.r.raft.log.inmemory.InMemoryRaftLog

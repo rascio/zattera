@@ -2,9 +2,9 @@ package io.r.raft.machine
 
 import arrow.fx.coroutines.ResourceScope
 import arrow.fx.coroutines.autoCloseable
-import io.r.raft.NodeId
-import io.r.raft.RaftMessage
-import io.r.raft.RaftProtocol
+import io.r.raft.protocol.NodeId
+import io.r.raft.protocol.RaftMessage
+import io.r.raft.protocol.RaftRpc
 import io.r.raft.transport.RaftClusterNode
 import io.r.raft.transport.inmemory.InMemoryRaftClusterNode
 import io.r.utils.logs.entry
@@ -25,7 +25,7 @@ class RaftClusterInMemoryNetwork(vararg nodeIds: NodeId) : AutoCloseable {
         nodes.computeIfAbsent(name) { Channel(Channel.UNLIMITED) }
         val clusterNode = InMemoryRaftClusterNode(name, nodes)
         return object : RaftClusterNode by clusterNode {
-            override suspend fun send(node: NodeId, rpc: RaftProtocol) {
+            override suspend fun send(node: NodeId, rpc: RaftRpc) {
                 when {
                     node in isolatedNodes -> {
                         logger.info(entry("isolated_node", "node" to node, "rpc" to rpc::class.simpleName))

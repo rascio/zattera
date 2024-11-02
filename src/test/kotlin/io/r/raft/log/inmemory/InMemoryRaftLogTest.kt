@@ -1,8 +1,8 @@
 package io.r.raft.log.inmemory
 
-import io.r.raft.LogEntry
-import io.r.raft.NodeId
-import io.r.raft.Term
+import io.r.raft.protocol.LogEntry
+import io.r.raft.protocol.NodeId
+import io.r.raft.protocol.Term
 import io.r.raft.log.AbstractRaftLogTest
 import io.r.raft.log.RaftLog
 import java.util.TreeMap

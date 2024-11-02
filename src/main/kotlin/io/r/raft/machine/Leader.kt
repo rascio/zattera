@@ -1,12 +1,11 @@
 package io.r.raft.machine
 
-import io.r.raft.Index
-import io.r.raft.LogEntryMetadata
-import io.r.raft.NodeId
-import io.r.raft.PeerState
-import io.r.raft.RaftMessage
-import io.r.raft.RaftProtocol
-import io.r.raft.RaftRole
+import io.r.raft.protocol.Index
+import io.r.raft.protocol.LogEntryMetadata
+import io.r.raft.protocol.NodeId
+import io.r.raft.protocol.RaftMessage
+import io.r.raft.protocol.RaftRpc
+import io.r.raft.protocol.RaftRole
 import io.r.raft.log.RaftLog
 import io.r.raft.transport.RaftClusterNode
 import io.r.raft.transport.RaftClusterNode.Companion.quorum
@@ -68,14 +67,14 @@ class Leader(
         require(message.rpc.term <= log.getTerm()) { "Leader received message with higher term" }
 
         when (message.rpc) {
-            is RaftProtocol.AppendEntriesResponse -> {
+            is RaftRpc.AppendEntriesResponse -> {
                 updatePeerMetadata(message.from, message.rpc)
                 // Update commit index, this needs to be done after updating the peer metadata
                 commitIndex = getQuorum()
                 getNextBatch(message.from, message.rpc)?.let { (prev, entries) ->
                     clusterNode.send(
                         message.from,
-                        RaftProtocol.AppendEntries(
+                        RaftRpc.AppendEntries(
                             term = log.getTerm(),
                             leaderId = clusterNode.id,
                             prevLog = prev,
@@ -86,10 +85,10 @@ class Leader(
                 }
             }
 
-            is RaftProtocol.AppendEntries -> {
+            is RaftRpc.AppendEntries -> {
                 clusterNode.send(
                     message.from,
-                    RaftProtocol.AppendEntriesResponse(
+                    RaftRpc.AppendEntriesResponse(
                         term = log.getTerm(),
                         matchIndex = message.rpc.prevLog.index,
                         success = false,
@@ -98,10 +97,10 @@ class Leader(
                 )
             }
 
-            is RaftProtocol.RequestVote -> {
+            is RaftRpc.RequestVote -> {
                 clusterNode.send(
                     message.from,
-                    RaftProtocol.RequestVoteResponse(
+                    RaftRpc.RequestVoteResponse(
                         term = message.rpc.term,
                         voteGranted = false
                     )
@@ -134,7 +133,7 @@ class Leader(
         return commitIndex
     }
 
-    private suspend fun getNextBatch(from: NodeId, message: RaftProtocol.AppendEntriesResponse) =
+    private suspend fun getNextBatch(from: NodeId, message: RaftRpc.AppendEntriesResponse) =
         checkNotNull(peers[from]) { "Peer not found $from" }
             // Only send the next batch if the matchIndex is the same as the one we are expecting
             // and the matchIndex is less than the commitIndex (follower is behind)
@@ -151,7 +150,7 @@ class Leader(
                 previous to entries
             }
 
-    private fun updatePeerMetadata(from: NodeId, message: RaftProtocol.AppendEntriesResponse) {
+    private fun updatePeerMetadata(from: NodeId, message: RaftRpc.AppendEntriesResponse) {
         peers.computeIfPresent(from) { _, state ->
             when {
                 message.success -> state.copy(
@@ -179,7 +178,7 @@ class Leader(
         logger.debug("${clusterNode.id} Heartbeat (last ${System.currentTimeMillis() - lastTimeContacted}ms ago) => ${this}[T${log.getTerm()},$nextIndex,$matchIndex] (${entries.size})")
         clusterNode.send(
             this,
-            RaftProtocol.AppendEntries(
+            RaftRpc.AppendEntries(
                 term = log.getTerm(),
                 leaderId = clusterNode.id,
                 prevLog = log.getMetadata(nextIndex - 1)

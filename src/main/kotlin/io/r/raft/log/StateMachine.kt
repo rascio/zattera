@@ -1,7 +1,7 @@
 package io.r.raft.log
 
-import io.r.raft.Index
-import io.r.raft.LogEntry
+import io.r.raft.protocol.Index
+import io.r.raft.protocol.LogEntry
 
 interface StateMachine {
     /**

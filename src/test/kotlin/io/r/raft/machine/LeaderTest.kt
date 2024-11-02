@@ -4,14 +4,12 @@ import arrow.fx.coroutines.ResourceScope
 import arrow.fx.coroutines.resourceScope
 import io.kotest.common.ExperimentalKotest
 import io.kotest.core.spec.style.FunSpec
-import io.kotest.core.test.testCoroutineScheduler
 import io.kotest.matchers.shouldBe
-import io.r.raft.Index
-import io.r.raft.LogEntryMetadata
-import io.r.raft.NodeId
-import io.r.raft.PeerState
-import io.r.raft.RaftMessage
-import io.r.raft.RaftProtocol
+import io.r.raft.protocol.Index
+import io.r.raft.protocol.LogEntryMetadata
+import io.r.raft.protocol.NodeId
+import io.r.raft.protocol.RaftMessage
+import io.r.raft.protocol.RaftRpc
 import io.r.raft.log.RaftLog.Companion.getLastMetadata
 import io.r.raft.log.inmemory.InMemoryRaftLog
 import io.r.raft.test.RaftLogBuilderScope.Companion.raftLog
@@ -26,12 +24,10 @@ import kotlinx.coroutines.channels.ChannelResult
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.withTimeoutOrNull
-import kotlinx.coroutines.yield
 import org.apache.logging.log4j.LogManager
 import kotlin.test.assertEquals
 import kotlin.test.assertIs
 import kotlin.test.assertNull
-import kotlin.test.assertTrue
 import kotlin.time.Duration.Companion.milliseconds
 import kotlin.time.Duration.Companion.seconds
 
@@ -62,7 +58,7 @@ class LeaderTest : FunSpec({
                     N1 shouldReceive RaftMessage(
                         from = "UnderTest",
                         to = "N1",
-                        rpc = RaftProtocol.AppendEntries(
+                        rpc = RaftRpc.AppendEntries(
                             term = 2,
                             leaderId = "UnderTest",
                             prevLog = log.getLastMetadata(),
@@ -73,7 +69,7 @@ class LeaderTest : FunSpec({
                     N2 shouldReceive RaftMessage(
                         from = "UnderTest",
                         to = "N2",
-                        rpc = RaftProtocol.AppendEntries(
+                        rpc = RaftRpc.AppendEntries(
                             term = 2,
                             leaderId = "UnderTest",
                             prevLog = log.getLastMetadata(),
@@ -86,7 +82,7 @@ class LeaderTest : FunSpec({
                     N1 shouldReceive RaftMessage(
                         from = "UnderTest",
                         to = "N1",
-                        rpc = RaftProtocol.AppendEntries(
+                        rpc = RaftRpc.AppendEntries(
                             term = 2,
                             leaderId = "UnderTest",
                             prevLog = log.getLastMetadata(),
@@ -97,7 +93,7 @@ class LeaderTest : FunSpec({
                     N2 shouldReceive RaftMessage(
                         from = "UnderTest",
                         to = "N2",
-                        rpc = RaftProtocol.AppendEntries(
+                        rpc = RaftRpc.AppendEntries(
                             term = 2,
                             leaderId = "UnderTest",
                             prevLog = log.getLastMetadata(),
@@ -135,7 +131,7 @@ class LeaderTest : FunSpec({
                             from = "N1",
                             to = "UnderTest",
                             // means the log at index 1 (prevLog) is not matching
-                            rpc = RaftProtocol.AppendEntriesResponse(
+                            rpc = RaftRpc.AppendEntriesResponse(
                                 term = 2,
                                 matchIndex = 1,
                                 success = false,
@@ -149,7 +145,7 @@ class LeaderTest : FunSpec({
                     N1 shouldReceive RaftMessage(
                         from = "UnderTest",
                         to = "N1",
-                        rpc = RaftProtocol.AppendEntries(
+                        rpc = RaftRpc.AppendEntries(
                             term = 2,
                             leaderId = "UnderTest",
                             prevLog = LogEntryMetadata.ZERO,
@@ -184,7 +180,7 @@ class LeaderTest : FunSpec({
                         RaftMessage(
                             from = "N1",
                             to = "UnderTest",
-                            rpc = RaftProtocol.AppendEntriesResponse(
+                            rpc = RaftRpc.AppendEntriesResponse(
                                 term = 2,
                                 matchIndex = 1,
                                 success = true,
@@ -197,7 +193,7 @@ class LeaderTest : FunSpec({
                     N1 shouldReceive RaftMessage(
                         from = "UnderTest",
                         to = "N1",
-                        rpc = RaftProtocol.AppendEntries(
+                        rpc = RaftRpc.AppendEntries(
                             term = 2,
                             leaderId = "UnderTest",
                             prevLog = log.getMetadata(1)!!,
@@ -243,7 +239,7 @@ class LeaderTest : FunSpec({
                         from = "N1",
                         to = "UnderTest",
                         // Confirmation of N1 is now consistent up to N
-                        rpc = RaftProtocol.AppendEntriesResponse(
+                        rpc = RaftRpc.AppendEntriesResponse(
                             term = 2,
                             matchIndex = N,
                             success = true,
@@ -309,7 +305,7 @@ class LeaderTest : FunSpec({
             val response = withTimeout(1000) {
                 N1.receive().rpc
             }
-            assertIs<RaftProtocol.AppendEntries>(response)
+            assertIs<RaftRpc.AppendEntries>(response)
             assertEquals(2, response.prevLog.index)
             assertEquals(5, response.prevLog.term)
             assertEquals(0, response.entries.size)
@@ -319,7 +315,7 @@ class LeaderTest : FunSpec({
                 RaftMessage(
                     from = "N1",
                     to = "UnderTest",
-                    rpc = RaftProtocol.AppendEntriesResponse(
+                    rpc = RaftRpc.AppendEntriesResponse(
                         term = 5,
                         matchIndex = -1,
                         success = false,
@@ -328,7 +324,7 @@ class LeaderTest : FunSpec({
                 )
             )
             N1.receive()
-                .let { assertIs<RaftProtocol.AppendEntries>(it.rpc) }
+                .let { assertIs<RaftRpc.AppendEntries>(it.rpc) }
                 .run {
                     assertEquals(5, term)
                     assertEquals(2, prevLog.index)

@@ -14,9 +14,9 @@ import io.ktor.server.routing.Route
 import io.ktor.server.routing.post
 import io.ktor.server.routing.route
 import io.ktor.util.collections.ConcurrentSet
-import io.r.raft.NodeId
-import io.r.raft.RaftMessage
-import io.r.raft.RaftProtocol
+import io.r.raft.protocol.NodeId
+import io.r.raft.protocol.RaftMessage
+import io.r.raft.protocol.RaftRpc
 import io.r.raft.transport.RaftClusterNode
 import io.r.utils.logs.entry
 import kotlinx.coroutines.Dispatchers
@@ -48,7 +48,7 @@ class KtorRestRaftClusterNode(
     private val unavailableNodes = ConcurrentSet<NodeId>()
     override val peers: Set<NodeId> = peersMap.keys
 
-    override suspend fun send(node: NodeId, rpc: RaftProtocol) {
+    override suspend fun send(node: NodeId, rpc: RaftRpc) {
         client.launch(Dispatchers.IO) {
             val address = peersMap[node] ?: error("Unknown node $node")
             val message = RaftMessage(

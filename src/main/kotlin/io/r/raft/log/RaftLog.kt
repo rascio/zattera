@@ -1,10 +1,10 @@
 package io.r.raft.log
 
-import io.r.raft.Index
-import io.r.raft.LogEntry
-import io.r.raft.LogEntryMetadata
-import io.r.raft.NodeId
-import io.r.raft.Term
+import io.r.raft.protocol.Index
+import io.r.raft.protocol.LogEntry
+import io.r.raft.protocol.LogEntryMetadata
+import io.r.raft.protocol.NodeId
+import io.r.raft.protocol.Term
 
 interface RaftLog {
 

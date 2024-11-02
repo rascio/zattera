@@ -1,10 +1,10 @@
 package io.r.raft.machine
 
-import io.r.raft.Index
-import io.r.raft.LogEntryMetadata
-import io.r.raft.RaftMessage
-import io.r.raft.RaftProtocol
-import io.r.raft.RaftRole
+import io.r.raft.protocol.Index
+import io.r.raft.protocol.LogEntryMetadata
+import io.r.raft.protocol.RaftMessage
+import io.r.raft.protocol.RaftRpc
+import io.r.raft.protocol.RaftRole
 import io.r.raft.log.RaftLog
 import io.r.raft.log.RaftLog.Companion.getLastMetadata
 import io.r.raft.transport.RaftClusterNode
@@ -22,20 +22,20 @@ class Follower(
 
     override suspend fun onReceivedMessage(message: RaftMessage) {
         when (message.rpc) {
-            is RaftProtocol.RequestVote -> {
+            is RaftRpc.RequestVote -> {
                 val granted = message.rpc.term >= log.getTerm()
                     && log.getVotedFor().let { it == null || it == message.from }
                     && message.rpc.lastLog >= log.getLastMetadata()
                 log.setVotedFor(message.from)
                 clusterNode.send(
                     message.from,
-                    RaftProtocol.RequestVoteResponse(
+                    RaftRpc.RequestVoteResponse(
                         log.getTerm(),
                         granted
                     )
                 )
             }
-            is RaftProtocol.AppendEntries -> {
+            is RaftRpc.AppendEntries -> {
                 val result = when {
                     message.rpc.term < log.getTerm() -> AppendResult.TermMismatch
                     message.rpc.prevLog.index > log.getLastIndex() -> AppendResult.PreviousIndexNotFound
@@ -60,7 +60,7 @@ class Follower(
                 if (result is AppendResult.Success) {
                     commitIndex = message.rpc.leaderCommit
                     message.from.send(
-                        RaftProtocol.AppendEntriesResponse(
+                        RaftRpc.AppendEntriesResponse(
                             term = log.getTerm(),
                             matchIndex = result.index,
                             success = true,
@@ -69,7 +69,7 @@ class Follower(
                     )
                 } else {
                     message.from.send(
-                        RaftProtocol.AppendEntriesResponse(
+                        RaftRpc.AppendEntriesResponse(
                             term = log.getTerm(),
                             matchIndex = message.rpc.prevLog.index,
                             success = false,

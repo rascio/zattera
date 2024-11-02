@@ -1,9 +1,9 @@
 package io.r.raft.test
 
-import io.r.raft.Index
-import io.r.raft.LogEntry
-import io.r.raft.NodeId
-import io.r.raft.Term
+import io.r.raft.protocol.Index
+import io.r.raft.protocol.LogEntry
+import io.r.raft.protocol.NodeId
+import io.r.raft.protocol.Term
 import io.r.raft.log.inmemory.InMemoryRaftLog
 import java.util.TreeMap
 

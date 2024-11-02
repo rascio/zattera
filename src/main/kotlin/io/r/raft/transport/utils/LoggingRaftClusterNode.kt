@@ -1,8 +1,8 @@
 package io.r.raft.transport.utils
 
-import io.r.raft.NodeId
-import io.r.raft.RaftMessage
-import io.r.raft.RaftProtocol
+import io.r.raft.protocol.NodeId
+import io.r.raft.protocol.RaftMessage
+import io.r.raft.protocol.RaftRpc
 import io.r.raft.transport.RaftClusterNode
 import org.apache.logging.log4j.LogManager
 
@@ -10,7 +10,7 @@ class LoggingRaftClusterNode(private val delegate: RaftClusterNode) : RaftCluste
 
     private val logger = LogManager.getLogger("${LoggingRaftClusterNode::class.java.name}.${delegate.id}")
 
-    override suspend fun send(node: NodeId, rpc: RaftProtocol) {
+    override suspend fun send(node: NodeId, rpc: RaftRpc) {
         logger.info("== ${rpc.describe()}) ==> $node")
         delegate.send(node, rpc)
     }
