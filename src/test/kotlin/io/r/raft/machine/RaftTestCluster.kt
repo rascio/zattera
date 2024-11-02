@@ -2,14 +2,12 @@ package io.r.raft.machine
 
 import arrow.fx.coroutines.ResourceScope
 import io.r.raft.protocol.NodeId
-import io.r.raft.protocol.RaftRole
 import io.r.utils.awaitility.await
 import io.r.utils.awaitility.coUntilNotNull
 import io.r.utils.awaitility.timeout
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withTimeoutOrNull
 import org.apache.logging.log4j.LogManager
 import org.apache.logging.log4j.Logger
@@ -23,8 +21,8 @@ class RaftTestCluster(val nodes: List<RaftTestNode>) {
 
     suspend fun append(vararg commands: String) = append(commands.toList())
     suspend fun append(commands: List<String>): Unit = coroutineScope {
-        nodes.firstOrNull { r -> r.raftMachine.role.first() == RaftRole.LEADER }
-            ?.let { leader ->
+        awaitLeader()
+            .let { leader ->
                 try {
                     withTimeoutOrNull(1000) {
                         leader.raftMachine.command(commands.map { it.encodeToByteArray() })
@@ -60,8 +58,8 @@ class RaftTestCluster(val nodes: List<RaftTestNode>) {
     /**
      * Wait until a leader is elected
      */
-    fun awaitLeader() =
-        "await_leader_election".await coUntilNotNull res@{
+    fun awaitLeader(timeout: Duration = 3.seconds) =
+        "await_leader_election".await.timeout(timeout) coUntilNotNull res@{
             nodes.filter { it.isLeader }
                 .groupBy { it.log.getTerm() }
                 .takeIf { it.size == 1 }
@@ -71,8 +69,8 @@ class RaftTestCluster(val nodes: List<RaftTestNode>) {
                 ?.first()
         }
 
-    fun awaitLeaderChange(initialLeader: NodeId) =
-        "await_leader_change".await coUntilNotNull {
+    fun awaitLeaderChangeFrom(initialLeader: NodeId, timeout: Duration = 3.seconds) =
+        "await_leader_change".await.timeout(timeout) coUntilNotNull {
             nodes.filter { it.id != initialLeader }
                 .filter { it.isLeader }
                 .groupBy { it.log.getTerm() }

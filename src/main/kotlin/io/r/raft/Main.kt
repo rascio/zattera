@@ -37,7 +37,18 @@ import java.util.concurrent.Callable
 import kotlin.system.exitProcess
 
 
-@Command(name = "rest-raft-server")
+@Command(
+    name = "rest-raft-server",
+    descriptionHeading = """
+        RestRaftServer
+        =============
+        
+        Start a Raft server with a REST API.
+        Useful endpoints are:
+        - POST /entries on the leader to append a new entry
+        - GET /entries to get all entries
+    """,
+)
 class RestRaftServer : Callable<String> {
 
     private val logger = LogManager.getLogger(RestRaftServer::class.java)

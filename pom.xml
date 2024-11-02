@@ -22,12 +22,6 @@
     </dependencyManagement>
     <dependencies>
         <dependency>
-            <groupId>org.slf4j</groupId>
-            <artifactId>slf4j-simple</artifactId>
-            <version>2.0.13</version>
-            <scope>runtime</scope>
-        </dependency>
-        <dependency>
             <groupId>org.apache.logging.log4j</groupId>
             <artifactId>log4j-core</artifactId>
             <version>2.23.1</version>
@@ -95,11 +89,6 @@
         <dependency>
             <groupId>io.arrow-kt</groupId>
             <artifactId>arrow-fx-coroutines</artifactId>
-            <version>1.2.0-RC</version>
-        </dependency>
-        <dependency>
-            <groupId>io.arrow-kt</groupId>
-            <artifactId>arrow-fx-stm</artifactId>
             <version>1.2.0-RC</version>
         </dependency>
         <dependency>

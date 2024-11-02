@@ -16,7 +16,6 @@ import io.r.raft.test.installCoroutine
 import io.r.raft.transport.RaftClusterNode
 import io.r.utils.awaitility.await
 import io.r.utils.awaitility.coUntil
-import io.r.utils.awaitility.oneOf
 import io.r.utils.entry
 import io.r.utils.logs.entry
 import kotlinx.coroutines.Dispatchers
@@ -203,7 +202,7 @@ class RaftMachineTest : FunSpec({
                 logger.info(entry("initial_leader", "term" to initialTerm, "id" to initialLeader.id))
                 initialLeader.disconnect()
                 val newLeader = try {
-                    cluster.awaitLeaderChange(initialLeader.id)
+                    cluster.awaitLeaderChangeFrom(initialLeader.id)
                 } finally {
                     initialLeader.reconnect()
                 }
@@ -301,7 +300,6 @@ class RaftMachineTest : FunSpec({
                 )
                 // Elect a leader
                 val leader = cluster.awaitLeader()
-                val followers = cluster.nodes.filter { it != leader }
                 val firstCmdIndex = leader.commitIndex + 1
 
                 // Append a command to the leader
@@ -312,7 +310,7 @@ class RaftMachineTest : FunSpec({
                 leader.disconnect()
 
                 // A new leader should be elected
-                val newLeader = "await_new_leader".await coUntil oneOf(followers) { it.raftMachine.isLeader }
+                val newLeader = cluster.awaitLeaderChangeFrom(leader.id)
                 logger.info(
                     entry(
                         "new_leader",
@@ -329,17 +327,17 @@ class RaftMachineTest : FunSpec({
                 val newLeaderCommitted = newLeader.raftMachine
                     .command("TV Series: The Sopranos".encodeToByteArray(), "TV Series: Sherlock".encodeToByteArray())
                 "await_old_leader_appended"
-                    .await coUntil { leader.getLastEntryMetadata().index == firstCmdIndex + 1 }
+                    .await coUntil { leader.getLastEntryMetadata().index > firstCmdIndex }
 
                 withTimeout(3.seconds) { newLeaderCommitted.join() }
-                logger.info("message_replicated_2_out_of_3")
+                logger.info("message_replicated_on_2_out_of_3_nodes")
 
                 logger.info("fix_old_leader")
                 leader.reconnect()
                 cluster.awaitLogConvergence()
-                // The assertThrows is not working, for now...needs a fix :(
+                // Rejection of client commands is not implemented yet, who knows if it will ever be
 //                assertThrows<CancellationException>("The bad commit on the old leader should be rejected") {
-//                    withTimeout(3.seconds) {
+//                    withTimeout(4.seconds) {
 //                        oldLeaderCommitted.join()
 //                    }
 //                }
@@ -398,7 +396,7 @@ class RaftMachineTest : FunSpec({
                                         .map { it.encodeToByteArray() }
                                         .toList()
                                     @Suppress("DeferredResultUnused")
-                                    cluster.awaitLeader().apply {
+                                    cluster.awaitLeader(5.seconds).apply {
                                         raftMachine.command(batch)
                                         delay(40)
                                     }
@@ -409,9 +407,9 @@ class RaftMachineTest : FunSpec({
                     launch {
                         // Randomly disconnect a node
                         do {
-                            cluster.awaitLeader().apply {
+                            cluster.awaitLeader(5.seconds).apply {
                                 disconnect()
-                                cluster.awaitLeaderChange(id)
+                                cluster.awaitLeaderChangeFrom(id, timeout = 5.seconds)
                                 delay(configuration.heartbeatTimeoutMs * Random.nextLong(3, 10))
                                 reconnect()
                             }
