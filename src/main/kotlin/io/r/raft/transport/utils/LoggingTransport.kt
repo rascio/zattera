@@ -10,12 +10,12 @@ class LoggingTransport<NodeRef: RaftNode>(logTag: String, private val delegate: 
     override suspend fun receive(): RaftMessage {
 //        log("Wait for message")
         val message = delegate.receive()
-        logger.info("${message.to} <==${message.protocol::class.simpleName}== ${message.from}", "message" to message.protocol)
+        logger.info("${message.to} <==${message.rpc::class.simpleName}== ${message.from}", "message" to message.rpc)
         return message
     }
 
     override suspend fun send(node: NodeRef, message: RaftMessage) {
-        logger.info("${message.from} ==${message.protocol::class.simpleName}==> ${message.to}", "message" to message.protocol)
+        logger.info("${message.from} ==${message.rpc::class.simpleName}==> ${message.to}", "message" to message.rpc)
         delegate.send(node, message)
 //        log("Sent ${message.protocol::class.simpleName}")
     }

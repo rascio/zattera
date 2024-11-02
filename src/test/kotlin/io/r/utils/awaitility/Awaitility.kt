@@ -6,6 +6,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.awaitility.Awaitility
 import org.awaitility.core.ConditionFactory
+import org.awaitility.kotlin.untilNotNull
 import kotlin.coroutines.CoroutineContext
 import kotlin.coroutines.suspendCoroutine
 import kotlin.time.Duration
@@ -13,7 +14,10 @@ import kotlin.time.toJavaDuration
 
 val String.await: ConditionFactory get() = Awaitility.await().alias(this)
 
-infix fun ConditionFactory.withTimeout(duration: Duration) = timeout(duration.toJavaDuration())
+infix fun ConditionFactory.timeout(duration: Duration) = timeout(duration.toJavaDuration())
+infix fun <E> ConditionFactory.coUntilNotNull(block: suspend () -> E?) = untilNotNull { runBlocking(block) }
+
+
 
 typealias SuspendCondition = suspend () -> Boolean
 suspend infix fun ConditionFactory.coUntil(condition: SuspendCondition) = withContext(Dispatchers.IO) {

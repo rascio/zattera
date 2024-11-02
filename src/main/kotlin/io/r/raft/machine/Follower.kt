@@ -2,7 +2,6 @@ package io.r.raft.machine
 
 import io.r.raft.Index
 import io.r.raft.LogEntryMetadata
-import io.r.raft.Persistence
 import io.r.raft.RaftMessage
 import io.r.raft.RaftProtocol
 import io.r.raft.RaftRole
@@ -18,15 +17,15 @@ class Follower(
     val configuration: RaftMachine.Configuration,
     override val log: RaftLog,
     override val clusterNode: RaftClusterNode,
-    override val changeRole: suspend (RaftRole) -> Role
+    override val changeRole: RoleTransition
 ) : Role() {
 
     override suspend fun onReceivedMessage(message: RaftMessage) {
-        when (message.protocol) {
+        when (message.rpc) {
             is RaftProtocol.RequestVote -> {
-                val granted = message.protocol.term >= log.getTerm()
+                val granted = message.rpc.term >= log.getTerm()
                     && log.getVotedFor().let { it == null || it == message.from }
-                    && message.protocol.lastLog >= log.getLastMetadata()
+                    && message.rpc.lastLog >= log.getLastMetadata()
                 log.setVotedFor(message.from)
                 clusterNode.send(
                     message.from,
@@ -38,38 +37,41 @@ class Follower(
             }
             is RaftProtocol.AppendEntries -> {
                 val result = when {
-                    message.protocol.term < log.getTerm() -> AppendResult.TermMismatch
-                    message.protocol.prevLog.index > log.getLastIndex() -> AppendResult.PreviousIndexNotFound
-                    message.protocol.prevLog.index < 0L -> AppendResult.BadInput("Previous index must be greater than 0")
+                    message.rpc.term < log.getTerm() -> AppendResult.TermMismatch
+                    message.rpc.prevLog.index > log.getLastIndex() -> AppendResult.PreviousIndexNotFound
+                    message.rpc.prevLog.index < 0L -> AppendResult.BadInput("Previous index must be greater than 0")
                     else -> {
-                        val metadata = log.getMetadata(message.protocol.prevLog.index)
+                        val metadata = log.getMetadata(message.rpc.prevLog.index)
                         checkNotNull(metadata) { "Metadata for previous index must always be available" }
                         when {
-                            metadata != message.protocol.prevLog -> AppendResult.PreviousIndexMismatch(
-                                expected = message.protocol.prevLog,
+                            metadata != message.rpc.prevLog -> AppendResult.PreviousIndexMismatch(
+                                expected = message.rpc.prevLog,
                                 actual = metadata
                             )
                             else -> AppendResult.Success(
-                                log.append(message.protocol.prevLog.index, message.protocol.entries)
+                                log.append(message.rpc.prevLog.index, message.rpc.entries)
                             )
                         }
                     }
                 }
+                if (result !is AppendResult.Success) {
+                    logger.warn(entry("Rejected_Append", "res" to result, "prev" to "I${message.rpc.prevLog.index},T${message.rpc.prevLog.term}"))
+                }
                 if (result is AppendResult.Success) {
-                    commitIndex = message.protocol.leaderCommit
+                    commitIndex = message.rpc.leaderCommit
                     message.from.send(
                         RaftProtocol.AppendEntriesResponse(
                             term = log.getTerm(),
                             matchIndex = result.index,
                             success = true,
-                            entries = message.protocol.entries.size
+                            entries = message.rpc.entries.size
                         )
                     )
                 } else {
                     message.from.send(
                         RaftProtocol.AppendEntriesResponse(
                             term = log.getTerm(),
-                            matchIndex = -1,
+                            matchIndex = message.rpc.prevLog.index,
                             success = false,
                             entries = 0
                         )
@@ -77,7 +79,7 @@ class Follower(
                 }
             }
             else -> {
-                logger.debug(entry("Ignoring_Message", "message" to message.protocol, "from" to message.from))
+                logger.debug(entry("Ignoring_Message", "message" to message.rpc, "from" to message.from))
             }
         }
     }

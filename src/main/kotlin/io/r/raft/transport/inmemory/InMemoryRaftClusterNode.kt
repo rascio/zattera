@@ -16,7 +16,7 @@ class InMemoryRaftClusterNode(
         val message = RaftMessage(
             from = id,
             to = node,
-            protocol = rpc
+            rpc = rpc
         )
         (_peers[node] ?: error("Node $node not found"))
             .send(message)

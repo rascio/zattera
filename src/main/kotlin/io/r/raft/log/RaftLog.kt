@@ -43,6 +43,7 @@ interface RaftLog {
      * When `previous + entries.size < getLastIndex()`, the entries set after this batch will be removed.
      * @param previous the index of the last entry in the list
      * @param entries the entries to append
+     * @return the index of the last entry in the log
      */
     suspend fun append(previous: Index, entries: List<LogEntry>): Index
 

@@ -15,7 +15,7 @@ class ProtocolTest : FunSpec({
             val message = RaftMessage(
                 from = "1",
                 to = "1",
-                protocol = RaftProtocol.RequestVote(
+                rpc = RaftProtocol.RequestVote(
                     term = 0,
                     candidateId = "1",
                     lastLog = LogEntryMetadata(0, 0)
@@ -29,7 +29,7 @@ class ProtocolTest : FunSpec({
             val message = RaftMessage(
                 from = "1",
                 to = "1",
-                protocol = RaftProtocol.RequestVoteResponse(
+                rpc = RaftProtocol.RequestVoteResponse(
                     term = 0,
                     voteGranted = true
                 )
@@ -42,7 +42,7 @@ class ProtocolTest : FunSpec({
             val message = RaftMessage(
                 from = "1",
                 to = "1",
-                protocol = RaftProtocol.AppendEntries(
+                rpc = RaftProtocol.AppendEntries(
                     term = 0,
                     leaderId = "1",
                     prevLog = LogEntryMetadata(0, 0),
@@ -58,7 +58,7 @@ class ProtocolTest : FunSpec({
             val message = RaftMessage(
                 from = "1",
                 to = "1",
-                protocol = RaftProtocol.AppendEntriesResponse(
+                rpc = RaftProtocol.AppendEntriesResponse(
                     term = 0,
                     success = true,
                     matchIndex = 0,

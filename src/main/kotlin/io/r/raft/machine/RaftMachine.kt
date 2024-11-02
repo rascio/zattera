@@ -22,11 +22,14 @@ import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asSharedFlow
+import kotlinx.coroutines.flow.emitAll
 import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.merge
+import kotlinx.coroutines.flow.onCompletion
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
@@ -49,13 +52,15 @@ class RaftMachine(
     private var job: Job? = null
     private val mutex = Mutex()
     private val waitingForCommit = ConcurrentHashMap<String, CompletableDeferred<Unit>>()
-    val role: Flow<RaftRole> get() = _role.asSharedFlow().map {
-        when (it) {
-            is Follower -> RaftRole.FOLLOWER
-            is Candidate -> RaftRole.CANDIDATE
-            is Leader -> RaftRole.LEADER
+    val role: Flow<RaftRole> get() = flowOf(_role.value)
+        .onCompletion { emitAll(_role.asSharedFlow()) }
+        .map {
+            when (it) {
+                is Follower -> RaftRole.FOLLOWER
+                is Candidate -> RaftRole.CANDIDATE
+                is Leader -> RaftRole.LEADER
+            }
         }
-    }
     val commitIndex get() = _role.value.commitIndex
     val isLeader: Boolean get() = _role.value is Leader
 
@@ -78,14 +83,14 @@ class RaftMachine(
                 ensureActive()
                 when(step) {
                     is MessageReceived -> {
-                        if (step.message.protocol.term > log.getTerm()) {
-                            log.setTerm(step.message.protocol.term)
+                        if (step.message.rpc.term > log.getTerm()) {
+                            log.setTerm(step.message.rpc.term)
                             changeRole(RaftRole.FOLLOWER)
-                            logger.info(entry("RaftMachine_TermChange", "term" to log.getTerm()))
                         }
                         _role.value.onReceivedMessage(step.message)
                     }
                     Timeout -> {
+                        logger.info(entry("Timeout", "role" to _role.value::class.simpleName))
                         _role.value.onTimeout()
                     }
                 }
@@ -133,7 +138,7 @@ class RaftMachine(
                 from = lastApplied + 1,
                 length = (_role.value.commitIndex - lastApplied).toInt()
             )
-            logger.debug(entry("Applying_Committed", "entries" to entries.size))
+            logger.debug(entry("Applying_Committed", "entries" to entries.size, "lastApplied" to lastApplied, "commitIndex" to _role.value.commitIndex))
             stateMachine.apply(entries)
             entries.forEach { releaseCommit(it) }
         }
@@ -154,9 +159,16 @@ class RaftMachine(
     }
 
     suspend fun stop() {
-        job?.cancel("Stopping RaftMachine")
-        job?.join()
-        logger.debug(entry("Stopping_RaftMachine","job" to job))
+        waitingForCommit.forEach {
+            runCatching { it.value.cancel() }
+                .onFailure { e -> logger.warn(entry("cancel_error", "id" to it.key, "error" to it.value), e) }
+        }
+        waitingForCommit.clear()
+        job?.run {
+            logger.debug(entry("Stopping_RaftMachine","job" to job))
+            cancel("Stopping RaftMachine")
+            join()
+        }
     }
 
     private suspend fun changeRole(newRole: RaftRole): Role {

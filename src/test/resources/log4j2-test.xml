@@ -8,7 +8,6 @@
         </Console>
     </Appenders>
     <Loggers>
-        <Logger level="INFO" name="io.r.raft.machine" />
 
         <Root level="DEBUG">
             <AppenderRef ref="Console"/>

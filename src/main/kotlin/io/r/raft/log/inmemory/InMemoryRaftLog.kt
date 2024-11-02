@@ -46,6 +46,10 @@ class InMemoryRaftLog(
         return when {
             index == 0L -> LogEntryMetadata.ZERO
             else -> log[index]?.let { (term, _) -> LogEntryMetadata(index, term) }
+                ?: run {
+                    logger.warn(entry("LogEntry_Not_Found", "index" to index))
+                    null
+                }
         }
     }
 

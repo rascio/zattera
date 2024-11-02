@@ -27,8 +27,8 @@ import org.apache.logging.log4j.Logger
 import java.util.concurrent.ConcurrentLinkedQueue
 import java.util.concurrent.CountDownLatch
 import kotlin.math.ceil
-import kotlin.math.min
 
+@Deprecated("See [io.r.raft.machine.RaftMachine]")
 class RaftMachine<NodeRef : RaftNode>(
     private val configuration: Configuration<NodeRef>,
     private val transport: Transport<NodeRef>,
@@ -122,12 +122,12 @@ class RaftMachine<NodeRef : RaftNode>(
                 val received = when (this) {
                     is Leader -> transport.receive()
                     else -> transport.receive(configuration.leaderElectionTimeout).getOrElse {
-                        logger.info(entry("Timeout", "role" to this))
+                        logger.info(entry("Timeout", "role" to this::class.simpleName))
                         return RaftRole.CANDIDATE
                     }
                 }
 //            log("received", "message" to received.protocol::class.simpleName)
-                when (val message = received.protocol) {
+                when (val message = received.rpc) {
 
                     is RaftProtocol.AppendEntries -> {
                         if (message.term > persistence.getCurrentTerm()) {
@@ -401,12 +401,12 @@ class RaftMachine<NodeRef : RaftNode>(
         }
     }
 
-    private suspend fun NodeId.send(rcp: RaftProtocol) = transport.send(
+    private suspend fun NodeId.send(rpc: RaftProtocol) = transport.send(
         configuration.peers[this]!!,
         RaftMessage(
             from = configuration.id,
             to = this,
-            protocol = rcp
+            rpc = rpc
         )
     )
 }

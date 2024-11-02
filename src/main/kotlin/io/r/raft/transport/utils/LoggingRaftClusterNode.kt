@@ -17,7 +17,7 @@ class LoggingRaftClusterNode(private val delegate: RaftClusterNode) : RaftCluste
 
     override suspend fun receive(): RaftMessage {
         val message = delegate.receive()
-        logger.info("<== ${message.protocol.describe()} == ${message.from}")
+        logger.info("<== ${message.rpc.describe()} == ${message.from}")
         return message
     }
 }

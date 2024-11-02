@@ -7,6 +7,7 @@ import io.r.raft.RaftProtocol
 import io.r.raft.RaftRole
 import io.r.raft.log.RaftLog
 import io.r.raft.transport.RaftClusterNode
+import io.r.raft.transport.RaftClusterNode.Companion.quorum
 import io.r.utils.logs.entry
 import org.apache.logging.log4j.LogManager
 import org.apache.logging.log4j.Logger
@@ -26,6 +27,7 @@ class Candidate(
         val nextTerm = log.getTerm() + 1
         val lastIndex = log.getLastIndex()
         log.setTerm(nextTerm)
+        votesReceived += clusterNode.id
         logger.debug(entry("Starting_Election", "term" to nextTerm))
         clusterNode.peers.forEach { peer ->
             clusterNode.send(
@@ -40,13 +42,13 @@ class Candidate(
     }
 
     override suspend fun onReceivedMessage(message: RaftMessage) {
-        require(message.protocol.term <= log.getTerm()) { "Candidate received message with higher term" }
-        when (message.protocol) {
+        require(message.rpc.term <= log.getTerm()) { "Candidate received message with higher term" }
+        when (message.rpc) {
             is RaftProtocol.RequestVoteResponse -> {
-                if (message.protocol.voteGranted) {
+                if (message.rpc.voteGranted) {
                     votesReceived += message.from
                     logger.debug(entry("Received_Vote", "from" to message.from, "votes" to votesReceived.size, "quorum" to floor(clusterNode.peers.size / 2.0)))
-                    if (votesReceived.size >= floor(clusterNode.peers.size / 2.0)) {
+                    if (votesReceived.size >= clusterNode.quorum) {
                         changeRole(RaftRole.LEADER)
                     }
                 }
@@ -65,7 +67,7 @@ class Candidate(
                 )
             }
             else -> {
-                logger.debug(entry("Ignoring_Message", "message" to message.protocol, "from" to message.from))
+                logger.debug(entry("Ignoring_Message", "message" to message.rpc, "from" to message.from))
             }
         }
     }

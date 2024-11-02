@@ -20,7 +20,7 @@ interface ServerState {
 data class PeerState(
     val nextIndex: Index,
     val matchIndex: Index,
-    val lastContactTime: Long = System.currentTimeMillis()
+    val lastContactTime: Long = Long.MIN_VALUE
 )
 
 @Serializable
@@ -98,5 +98,5 @@ data class LogEntry(val term: Term, val command: ByteArray, val id: String = UUI
 data class RaftMessage(
     val from: NodeId,
     val to: NodeId,
-    val protocol: RaftProtocol
+    val rpc: RaftProtocol
 )

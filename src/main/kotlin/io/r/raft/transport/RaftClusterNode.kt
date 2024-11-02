@@ -13,4 +13,8 @@ interface RaftClusterNode {
 //    val onReceive: SelectClause1<RaftMessage>
 //    val input: Flow<RaftMessage>
 
+    companion object {
+        val RaftClusterNode.quorum: Int
+            get() = peers.size / 2 + 1
+    }
 }
