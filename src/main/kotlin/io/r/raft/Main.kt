@@ -2,7 +2,6 @@ package io.r.raft
 
 import arrow.atomic.AtomicLong
 import arrow.fx.coroutines.ResourceScope
-import arrow.fx.coroutines.guarantee
 import arrow.fx.coroutines.resourceScope
 import io.ktor.http.HttpStatusCode
 import io.ktor.server.application.Application
@@ -23,15 +22,13 @@ import io.r.raft.machine.RaftMachine
 import io.r.raft.protocol.Index
 import io.r.raft.protocol.LogEntry
 import io.r.raft.transport.ktor.KtorRestRaftClusterNode
+import io.r.raft.transport.ktor.KtorRestRaftClusterNode.RestNodeAddress
 import io.r.raft.transport.utils.LoggingRaftClusterNode
 import io.r.utils.logs.entry
 import kotlinx.coroutines.CoroutineName
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.coroutineScope
-import kotlinx.coroutines.flow.channelFlow
-import kotlinx.coroutines.flow.flow
-import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import org.apache.logging.log4j.LogManager
 import picocli.CommandLine
@@ -41,6 +38,10 @@ import picocli.CommandLine.Parameters
 import java.util.concurrent.Callable
 import kotlin.system.exitProcess
 
+fun main(args: Array<String>) {
+    val exitCode = CommandLine(RestRaftServer()).execute(*args)
+    exitProcess(exitCode)
+}
 
 @Command(
     name = "rest-raft-server",
@@ -88,24 +89,31 @@ class RestRaftServer : Callable<String> {
         }
         return "Started"
     }
+
     private suspend fun ResourceScope.execute() = coroutineScope {
         val raftLog = InMemoryRaftLog()
-        val raftClusterNode = KtorRestRaftClusterNode(id, peers.map { KtorRestRaftClusterNode.RestNodeAddress(it) }.toSet())
-        val raft = installRaftMachine(raftClusterNode, raftLog, CoroutineScope(Dispatchers.IO))
-        val http = install(
-            acquire = {
-                embeddedServer(Netty, port = port) {
-                    install(CORS) {
-                        anyHost()
-                    }
-                    installRoutes(raftClusterNode, raft, raftLog)
-                }
-            },
-            release = { it, _ -> it.stop() }
-        )
+        val raftClusterNode = KtorRestRaftClusterNode(id, peers.map(RestNodeAddress::parse).toSet())
+        val raftMachine = installRaftMachine(raftClusterNode, raftLog, CoroutineScope(Dispatchers.IO))
+        val http = installHttpServer(raftClusterNode, raftMachine, raftLog)
         logger.info(entry("Server_started", "id" to id, "port" to port))
         http.start(wait = true)
     }
+
+    private suspend fun ResourceScope.installHttpServer(
+        raftClusterNode: KtorRestRaftClusterNode,
+        raft: RaftMachine,
+        raftLog: InMemoryRaftLog
+    ) = install(
+        acquire = {
+            embeddedServer(Netty, port = port) {
+                install(CORS) {
+                    anyHost()
+                }
+                installRoutes(raftClusterNode, raft, raftLog)
+            }
+        },
+        release = { it, _ -> it.stop() }
+    )
 
     private fun Application.installRoutes(
         raftClusterNode: KtorRestRaftClusterNode,
@@ -113,9 +121,6 @@ class RestRaftServer : Callable<String> {
         raftLog: InMemoryRaftLog
     ) {
         routing {
-            get("/healthcheck") {
-                call.respondText("Tutt'apposto")
-            }
             route("/raft", raftClusterNode.endpoints)
             route("/entries") {
                 post {
@@ -155,9 +160,11 @@ class RestRaftServer : Callable<String> {
                 cluster = if (debugMessages) LoggingRaftClusterNode(raftClusterNode) else raftClusterNode,
                 log = raftLog,
                 stateMachine = object : StateMachine {
+
                     val lastApplied = AtomicLong()
 
                     override suspend fun apply(command: LogEntry) {
+                        // Do nothing for now
                         logger.info(entry("Applied", "command" to command.command.decodeToString()))
                         lastApplied.incrementAndGet()
                     }
@@ -169,9 +176,4 @@ class RestRaftServer : Callable<String> {
         },
         release = { it, _ -> it.stop() }
     )
-}
-
-fun main(args: Array<String>) {
-    val exitCode = CommandLine(RestRaftServer()).execute(*args)
-    exitProcess(exitCode)
 }

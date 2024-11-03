@@ -35,7 +35,7 @@ class KtorRestRaftClusterNode(
 
     data class RestNodeAddress(val id: NodeId, val host: String) {
         companion object {
-            operator fun invoke(value: String): RestNodeAddress {
+            fun parse(value: String): RestNodeAddress {
                 val (id, address) = value.split("=")
                 return RestNodeAddress(id, address)
             }
