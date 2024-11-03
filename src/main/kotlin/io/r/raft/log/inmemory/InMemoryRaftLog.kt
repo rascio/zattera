@@ -60,8 +60,8 @@ class InMemoryRaftLog(
     }
 
     override suspend fun append(previous: Index, entries: List<LogEntry>): Index = lock.withWriteLock {
-        entries.forEachIndexed { index, entry ->
-            log[index + previous + 1] = entry
+        entries.forEachIndexed { i, entry ->
+            log[previous + i + 1] = entry
         }
         if (previous + entries.size < getLastIndexInternal()) {
             log.tailMap(previous + entries.size, false).clear()

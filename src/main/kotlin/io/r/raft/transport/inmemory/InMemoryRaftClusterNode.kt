@@ -12,13 +12,13 @@ class InMemoryRaftClusterNode(
 ) : RaftClusterNode {
     override val peers: Set<NodeId> get() = _peers.keys - id
 
-    override suspend fun send(node: NodeId, rpc: RaftRpc) {
+    override suspend fun send(to: NodeId, rpc: RaftRpc) {
         val message = RaftMessage(
             from = id,
-            to = node,
+            to = to,
             rpc = rpc
         )
-        (_peers[node] ?: error("Node $node not found"))
+        (_peers[to] ?: error("Node $to not found"))
             .send(message)
     }
 

@@ -30,8 +30,9 @@ import org.apache.logging.log4j.Logger
 
 class KtorRestRaftClusterNode(
     override val id: NodeId,
-    _peers: Set<RestNodeAddress>
+    peers: Set<RestNodeAddress>
 ) : RaftClusterNode {
+
     data class RestNodeAddress(val id: NodeId, val host: String) {
         companion object {
             operator fun invoke(value: String): RestNodeAddress {
@@ -44,16 +45,17 @@ class KtorRestRaftClusterNode(
     private val json = Json
     private val client = HttpClient(CIO)
     private val messagesFromNodes = Channel<RaftMessage>(capacity = Channel.UNLIMITED)
-    private val peersMap = _peers.associateBy { it.id }
+    private val peersMap = peers.associateBy { it.id } - id
     private val unavailableNodes = ConcurrentSet<NodeId>()
+
     override val peers: Set<NodeId> = peersMap.keys
 
-    override suspend fun send(node: NodeId, rpc: RaftRpc) {
+    override suspend fun send(to: NodeId, rpc: RaftRpc) {
         client.launch(Dispatchers.IO) {
-            val address = peersMap[node] ?: error("Unknown node $node")
+            val address = peersMap[to] ?: error("Unknown node $to")
             val message = RaftMessage(
                 from = id,
-                to = node,
+                to = to,
                 rpc = rpc
             )
             runCatching {
@@ -62,13 +64,13 @@ class KtorRestRaftClusterNode(
                     setBody(json.encodeToString(message))
                 }
                 if (response.status != HttpStatusCode.Accepted) {
-                    logger.warn(entry("error_sending", "to" to node, "message" to rpc.describe(), "status" to response.status))
+                    logger.warn(entry("error_sending", "to" to to, "message" to rpc.describe(), "status" to response.status))
                 } else {
-                    unavailableNodes -= node
+                    unavailableNodes -= to
                 }
             }.onFailure { e ->
-                if (unavailableNodes.add(node)) {
-                    logger.warn(entry("error_sending", "to" to node, "message" to rpc.describe(), "error" to e.message))
+                if (unavailableNodes.add(to)) {
+                    logger.warn(entry("error_sending", "to" to to, "message" to rpc.describe(), "error" to e.message))
                 }
             }
         }

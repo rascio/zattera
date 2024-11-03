@@ -182,21 +182,9 @@ class FollowerTest : FunSpec({
             }
 
             test("If election timeout elapses, should transition to candidate") {
-
                 underTest.onTimeout()
 
                 probe shouldReceive RaftRole.CANDIDATE
-
-//                N1 shouldReceive RaftMessage(
-//                    from = "UnderTest",
-//                    to = "N1",
-//                    rpc = RaftProtocol.RequestVote(term = 1L, candidateId = "UnderTest", lastLog = log.getLastMetadata())
-//                )
-//                N2 shouldReceive RaftMessage(
-//                    from = "UnderTest",
-//                    to = "N1",
-//                    rpc = RaftProtocol.RequestVote(term = 1L, candidateId = "UnderTest", lastLog = log.getLastMetadata())
-//                )
             }
         }
     }

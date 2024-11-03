@@ -2,8 +2,10 @@ package io.r.raft
 
 import arrow.atomic.AtomicLong
 import arrow.fx.coroutines.ResourceScope
+import arrow.fx.coroutines.guarantee
 import arrow.fx.coroutines.resourceScope
 import io.ktor.http.HttpStatusCode
+import io.ktor.server.application.Application
 import io.ktor.server.application.call
 import io.ktor.server.application.install
 import io.ktor.server.engine.embeddedServer
@@ -27,6 +29,9 @@ import kotlinx.coroutines.CoroutineName
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.flow.channelFlow
+import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import org.apache.logging.log4j.LogManager
 import picocli.CommandLine
@@ -86,46 +91,53 @@ class RestRaftServer : Callable<String> {
     private suspend fun ResourceScope.execute() = coroutineScope {
         val raftLog = InMemoryRaftLog()
         val raftClusterNode = KtorRestRaftClusterNode(id, peers.map { KtorRestRaftClusterNode.RestNodeAddress(it) }.toSet())
-        val raft = installRaftMachine(raftClusterNode, raftLog, this@coroutineScope)
+        val raft = installRaftMachine(raftClusterNode, raftLog, CoroutineScope(Dispatchers.IO))
         val http = install(
             acquire = {
                 embeddedServer(Netty, port = port) {
                     install(CORS) {
                         anyHost()
                     }
-
-                    routing {
-                        get("/healthcheck") {
-                            call.respondText("Tutt'apposto")
-                        }
-                        route("/raft", raftClusterNode.endpoints)
-                        route("/entries") {
-                            post {
-                                val entry = call.receive<ByteArray>()
-                                runCatching {
-                                    raft.command(entry).join()
-                                }.onSuccess {
-                                    call.respondText("OK")
-                                }.onFailure {
-                                    call.respondText(
-                                        text = "Error: ${it.message}",
-                                        status = HttpStatusCode.InternalServerError
-                                    )
-                                }
-                            }
-                            get {
-                                raftLog.getEntries(0, Int.MAX_VALUE)
-                                    .joinToString("\n") { it.command.decodeToString() }
-                                    .let { call.respondText(it) }
-                            }
-                        }
-                    }
+                    installRoutes(raftClusterNode, raft, raftLog)
                 }
             },
             release = { it, _ -> it.stop() }
         )
         logger.info(entry("Server_started", "id" to id, "port" to port))
         http.start(wait = true)
+    }
+
+    private fun Application.installRoutes(
+        raftClusterNode: KtorRestRaftClusterNode,
+        raft: RaftMachine,
+        raftLog: InMemoryRaftLog
+    ) {
+        routing {
+            get("/healthcheck") {
+                call.respondText("Tutt'apposto")
+            }
+            route("/raft", raftClusterNode.endpoints)
+            route("/entries") {
+                post {
+                    val entry = call.receive<ByteArray>()
+                    runCatching {
+                        raft.command(entry).join()
+                    }.onSuccess {
+                        call.respondText("OK")
+                    }.onFailure {
+                        call.respondText(
+                            text = "Error: ${it.message}",
+                            status = HttpStatusCode.InternalServerError
+                        )
+                    }
+                }
+                get {
+                    raftLog.getEntries(0, Int.MAX_VALUE)
+                        .joinToString("\n") { it.command.decodeToString() }
+                        .let { call.respondText(it) }
+                }
+            }
+        }
     }
 
     private suspend fun ResourceScope.installRaftMachine(

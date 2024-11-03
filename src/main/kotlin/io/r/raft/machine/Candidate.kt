@@ -31,8 +31,8 @@ class Candidate(
         logger.debug(entry("Starting_Election", "term" to nextTerm))
         clusterNode.peers.forEach { peer ->
             clusterNode.send(
-                peer,
-                RaftRpc.RequestVote(
+                to = peer,
+                rpc = RaftRpc.RequestVote(
                     log.getTerm(),
                     clusterNode.id,
                     checkNotNull(log.getMetadata(lastIndex)) { "Metadata for lastIndex must always be available" }

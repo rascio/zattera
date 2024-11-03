@@ -10,9 +10,9 @@ class LoggingRaftClusterNode(private val delegate: RaftClusterNode) : RaftCluste
 
     private val logger = LogManager.getLogger("${LoggingRaftClusterNode::class.java.name}.${delegate.id}")
 
-    override suspend fun send(node: NodeId, rpc: RaftRpc) {
-        logger.info("== ${rpc.describe()}) ==> $node")
-        delegate.send(node, rpc)
+    override suspend fun send(to: NodeId, rpc: RaftRpc) {
+        logger.info("== ${rpc.describe()}) ==> $to")
+        delegate.send(to, rpc)
     }
 
     override suspend fun receive(): RaftMessage {

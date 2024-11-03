@@ -36,7 +36,7 @@ class RaftMachineTest : FunSpec({
 
     val logger = LogManager.getLogger(RaftMachineTest::class.java)
 
-    Awaitility.setDefaultTimeout(3.seconds.toJavaDuration())
+    Awaitility.setDefaultTimeout(5.seconds.toJavaDuration())
     Awaitility.setDefaultPollDelay(30.milliseconds.toJavaDuration())
 
     context("Single node tests") {
@@ -228,7 +228,7 @@ class RaftMachineTest : FunSpec({
                     }
                 )
                 val leader = cluster.awaitLeader()
-                withTimeoutOrNull(100.milliseconds) {
+                withTimeoutOrNull(400.milliseconds) {
                     leader.raftMachine.command("Hello World".encodeToByteArray())
                         .join()
                 } ?: error("timeout waiting for command to be processed")

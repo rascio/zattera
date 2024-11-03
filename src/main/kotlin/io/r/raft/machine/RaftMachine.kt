@@ -18,7 +18,6 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.flow.first
@@ -68,8 +67,6 @@ class RaftMachine(
                         getClusterCommand(),
                         getRoleTimeout()
                     ).first()
-
-                    ensureActive()
 
                     when (step) {
                         is MessageReceived -> {

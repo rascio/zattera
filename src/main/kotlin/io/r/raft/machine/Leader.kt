@@ -29,7 +29,7 @@ class Leader(
     private val configuration: RaftMachine.Configuration,
     private val peers: MutableMap<NodeId, PeerState> = mutableMapOf()
 ) : Role() {
-    internal var heartbeat: Job? = null
+    private var heartbeat: Job? = null
 
     override suspend fun onEnter() {
         check(heartbeat == null) { "Heartbeat already started" }
@@ -40,7 +40,7 @@ class Leader(
             clusterNode.peers.forEachIndexed { idx, peer ->
                 launch(CoroutineName("Heartbeat-$peer")) {
                     cont[idx].complete(Unit)
-                    logger.debug("${clusterNode.id} Starting heartbeat to $peer")
+                    logger.debug(entry("Starting_Heartbeat", "peer" to peer))
                     while (isActive) {
                         val now = System.currentTimeMillis()
                         val lastPeerContactedTime = peers[peer]?.lastContactTime ?: Long.MIN_VALUE
@@ -52,13 +52,13 @@ class Leader(
                     }
                 }
             }
-            logger.debug("${clusterNode.id} Heartbeat started")
+            logger.debug(entry("Heartbeat_Started"))
         }
         cont.joinAll()
     }
 
     override suspend fun onExit() {
-        logger.debug("${clusterNode.id} Stopping heartbeat")
+        logger.debug(entry("Stopping_Heartbeat"))
         heartbeat?.cancel()
         heartbeat = null
     }
@@ -115,21 +115,18 @@ class Leader(
 
     private suspend fun getQuorum(): Index {
         val currentTerm = log.getTerm()
-
-        for (index in (commitIndex + 1..peers.maxOf { (_, s) -> s.matchIndex }).reversed()) {
-            if (currentTerm != log.getMetadata(index)?.term) {
-                continue
-            }
-            var count = 1
-            for ((id, peer) in peers) {
-                if (peer.matchIndex >= index) {
-                    count++
-                    if (count >= clusterNode.quorum) {
-                        return index
-                    }
+        peers.maxOf { (_, s) -> s.matchIndex }
+            .let { (commitIndex + 1..it) }
+            .reversed()
+            .forEach { index ->
+                if (currentTerm != log.getMetadata(index)?.term) {
+                    return@forEach
+                }
+                val count = peers.values.count { it.matchIndex >= index }
+                if ((count + 1) >= clusterNode.quorum) {
+                    return index
                 }
             }
-        }
         return commitIndex
     }
 

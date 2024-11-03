@@ -25,10 +25,10 @@ class RaftClusterInMemoryNetwork(vararg nodeIds: NodeId) : AutoCloseable {
         nodes.computeIfAbsent(name) { Channel(Channel.UNLIMITED) }
         val clusterNode = InMemoryRaftClusterNode(name, nodes)
         return object : RaftClusterNode by clusterNode {
-            override suspend fun send(node: NodeId, rpc: RaftRpc) {
+            override suspend fun send(to: NodeId, rpc: RaftRpc) {
                 when {
-                    node in isolatedNodes -> {
-                        logger.info(entry("isolated_node", "node" to node, "rpc" to rpc::class.simpleName))
+                    to in isolatedNodes -> {
+                        logger.info(entry("isolated_node", "node" to to, "rpc" to rpc::class.simpleName))
                     }
 
                     clusterNode.id in isolatedNodes -> {
@@ -36,7 +36,7 @@ class RaftClusterInMemoryNetwork(vararg nodeIds: NodeId) : AutoCloseable {
                     }
 
                     else -> {
-                        clusterNode.send(node, rpc)
+                        clusterNode.send(to, rpc)
                     }
                 }
             }
