@@ -28,10 +28,22 @@ mvn -q exec:java -Dexec.mainClass=io.r.raft.MainKt \
   || kill -1 $(jps -v | grep zattera | cut -d ' ' -f1)
 ```
 
+Start a cluster
+```shell
+for i in {1..3}; do
+  mvn -q exec:java -Dexec.mainClass=io.r.raft.MainKt \
+    -Dexec.args="N$i --port 808$i --peer N1=http://localhost:8081 --peer N2=http://localhost:8082 --peer N3=http://localhost:8083 --election-timeout=2000 --heartbeat-timeout=500 --election-jitter=300" &
+done
+```
+
+
 ### Interact with Server
 
-```http request
-POST http://localhost:8081/entries
-
-Some raw text
+Add an entry to the log
+```shell
+POST http://localhost:8081/entries -d "Some raw text"
+```
+Read the log
+```shell
+GET http://localhost:8081/entries
 ```
