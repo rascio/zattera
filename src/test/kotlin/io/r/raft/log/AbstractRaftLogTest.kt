@@ -2,6 +2,8 @@ package io.r.raft.log
 
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.matchers.shouldBe
+import io.r.raft.log.RaftLog.Companion.AppendResult
+import io.r.raft.log.RaftLog.Companion.getLastMetadata
 import io.r.raft.protocol.LogEntry
 import io.r.raft.protocol.LogEntryMetadata
 import io.r.raft.protocol.NodeId
@@ -97,28 +99,36 @@ abstract class AbstractRaftLogTest : FunSpec() {
         context("Append") {
             test("should return 1 when append 1 entry to an empty log") {
                 val log = createLogFromState()
-                log.append(0L, listOf(entry(1L, "Test"))) shouldBe 1L
+                log.append(LogEntryMetadata.ZERO, listOf(entry(1L, "Test"))) shouldAppend 1L
             }
             test("should return N when append N entries to an empty log") {
                 val N = Random.nextLong(10, 50)
                 val log = createLogFromState()
-                log.append(0L, List(N.toInt()) { entry(1L, "Test_$it") }) shouldBe N
+                log.append(LogEntryMetadata.ZERO, List(N.toInt()) { entry(1L, "Test_$it") }) shouldAppend N
             }
             test("should return N+M when append N entries to a log with M entries") {
                 val M = Random.nextLong(10, 50)
                 val N = Random.nextLong(10, 50)
                 val log = createLogFromState(entries = List(M.toInt()) { entry(it.toLong(), "Test_$it") })
                 check(log.getLastIndex() == M) { "Precondition failed" }
-                log.append(log.getLastIndex(), List(N.toInt()) { entry(1L, "Test_${it + M}") }) shouldBe N + M
+                log.append(log.getLastMetadata(), List(N.toInt()) { entry(1L, "Test_${it + M}") }) shouldAppend N + M
             }
             test("should replace the entries and clean all the logs after it when the previous index is smaller than the last index") {
                 val entries = List(10) { entry(1L, "Test_$it") }
                 val log = createLogFromState(entries = entries)
                 check(log.getLastIndex() == 10L) { "Precondition failed" }
                 val newEntries = List(3) { entry(2L, "New_$it") }
-                log.append(4L, newEntries) shouldBe 7
+                log.append(LogEntryMetadata(4L, 1L), newEntries) shouldAppend 7
                 log.getLastIndex() shouldBe 7
                 log.getEntries(1, 10) shouldBe entries[1..4] + newEntries
+            }
+            test("should not append when the previous entry does not exist") {
+                val log = createLogFromState()
+                log.append(LogEntryMetadata(1L, 1L), listOf(entry(2L, "Test"))) shouldBe AppendResult.IndexNotFound
+            }
+            test("should not append when the previous entry term is different") {
+                val log = createLogFromState(entries = listOf(entry(1L, "Test")))
+                log.append(LogEntryMetadata(1L, 2L), listOf(entry(2L, "Test"))) shouldBe AppendResult.EntryMismatch
             }
         }
         context("votedFor") {
@@ -141,4 +151,6 @@ abstract class AbstractRaftLogTest : FunSpec() {
     abstract fun createLogFromState(term: Term = 0L, votedFor: NodeId? = null, entries: List<LogEntry> = emptyList()): RaftLog
 
     private operator fun List<LogEntry>.get(range: IntRange) = subList(range.first - 1, range.last)
+
+    private infix fun AppendResult.shouldAppend(n: Number) = this shouldBe AppendResult.Appended(n.toLong())
 }

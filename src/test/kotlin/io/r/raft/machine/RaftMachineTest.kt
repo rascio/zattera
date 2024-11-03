@@ -1,6 +1,5 @@
 package io.r.raft.machine
 
-import arrow.fx.coroutines.autoCloseable
 import arrow.fx.coroutines.resourceScope
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.matchers.comparables.shouldBeGreaterThan
@@ -9,21 +8,23 @@ import io.kotest.matchers.shouldBe
 import io.kotest.matchers.shouldNotBe
 import io.r.raft.protocol.LogEntryMetadata
 import io.r.raft.protocol.RaftMessage
+import io.r.raft.protocol.RaftRole
 import io.r.raft.protocol.RaftRpc
 import io.r.raft.protocol.RaftRpc.AppendEntries
 import io.r.raft.protocol.RaftRpc.AppendEntriesResponse
+import io.r.raft.test.failOnTimeout
 import io.r.raft.test.installCoroutine
 import io.r.raft.transport.RaftClusterNode
 import io.r.utils.awaitility.await
 import io.r.utils.awaitility.coUntil
-import io.r.utils.entry
 import io.r.utils.logs.entry
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeout
-import kotlinx.coroutines.withTimeoutOrNull
 import org.apache.logging.log4j.LogManager
 import org.awaitility.Awaitility
 import kotlin.random.Random
@@ -39,55 +40,92 @@ class RaftMachineTest : FunSpec({
     Awaitility.setDefaultTimeout(5.seconds.toJavaDuration())
     Awaitility.setDefaultPollDelay(30.milliseconds.toJavaDuration())
 
+    /*
+     * Simulate a cluster with 3 nodes
+     * Just one raft node is created and stopped at the end
+     * N1 and N2 are the transport for two mocked nodes
+     * They will not have a state machine attached,
+     * but they will be used to send messages to the node under test
+     */
     context("Single node tests") {
-        /*
-         * Simulate a cluster with 3 nodes
-         * Just one raft node is created and stopped at the end
-         * N1 and N2 are the transport for two mocked nodes
-         * They will not have a state machine attached,
-         * but they will be used to send messages to the node under test
-         */
-        resourceScope {
-            val cluster = autoCloseable {
-                RaftClusterInMemoryNetwork("N1", "N2", "UnderTest")
-            }
-            val N1 = cluster.createNode("N1")
-            val N2 = cluster.createNode("N2")
-            // Create the node with the state machine
-            // it is used in all tests and stopped at the end (through 'install')
+        context("A node in Leader state") {
+            test("Should step down when receiving a RequestVote with a higher term") {
+                resourceScope {
+                    val network = installRaftClusterNetwork()
+                    val N1 = network.createNode("N1")
+                    val N2 = network.createNode("N2")
 
-            val underTest = install(
-                acquire = {
-                    RaftTestNode(
-                        raftClusterInMemoryNetwork = cluster,
-                        nodeId = "UnderTest",
-                        configuration = RaftMachine.Configuration()
-                    ).apply { start() }
-                },
-                release = { n, _ -> n.stop() }
-            )
+                    val underTest = installRaftTestNode("UnderTest", network)
 
-            context("A node in Follower state") {
-                test("should grant the vote when receiving an updated RequestVote") {
-                    N1.sendTo(underTest) { RaftRpc.RequestVote(1L, "N1", LogEntryMetadata.ZERO) }
+                    // Elect underTest as leader
                     N1 shouldReceive RaftMessage(
                         from = underTest.id,
                         to = N1.id,
-                        rpc = RaftRpc.RequestVoteResponse(term = 1L, voteGranted = true)
+                        rpc = RaftRpc.RequestVote(1L, underTest.id, LogEntryMetadata.ZERO)
                     )
+                    N1.sendTo(underTest) {
+                        RaftRpc.RequestVoteResponse(1L, true)
+                    }
+                    N2 shouldReceive RaftMessage(
+                        from = underTest.id,
+                        to = N2.id,
+                        rpc = RaftRpc.RequestVote(1L, underTest.id, LogEntryMetadata.ZERO)
+                    )
+                    N2.sendTo(underTest) {
+                        RaftRpc.RequestVoteResponse(1L, true)
+                    }
+                    failOnTimeout("timeout waiting for leader", 1.seconds) {
+                        underTest.roleChanges.first { it == RaftRole.LEADER }
+                    }
+
+                    // Send a RequestVote with a higher term
+                    N1.sendTo(underTest) {
+                        RaftRpc.RequestVote(underTest.getCurrentTerm() + 1, N1.id, LogEntryMetadata.ZERO)
+                    }
+                    N1 shouldReceive RaftMessage(
+                        from = underTest.id,
+                        to = N1.id,
+                        rpc = RaftRpc.RequestVoteResponse(underTest.getCurrentTerm() + 1, true)
+                    )
+                    underTest.roleChanges.first() shouldBe RaftRole.FOLLOWER
                 }
-                test("should reply false when the term is smaller") {
-                    underTest.reboot { term = 1L }
-                    N1.sendTo(underTest) { AppendEntries(0L, N1.id, LogEntryMetadata.ZERO, emptyList(), 0L) }
-                    N1 shouldReceive RaftMessage(underTest.id, N1.id, AppendEntriesResponse(1L, 0, false, 0))
-                }
-                test("should reply reject AppendEntries when the prevLog index is not found") {
-                    underTest.reboot { term = 1L }
+            }
+            test("Should step down when receiving an AppendEntries with a higher term") {
+                resourceScope {
+                    val network = installRaftClusterNetwork()
+                    val N1 = network.createNode("N1")
+                    val N2 = network.createNode("N2")
+
+                    val underTest = installRaftTestNode("UnderTest", network)
+
+                    // Elect underTest as leader
+                    N1 shouldReceive RaftMessage(
+                        from = underTest.id,
+                        to = N1.id,
+                        rpc = RaftRpc.RequestVote(1L, underTest.id, LogEntryMetadata.ZERO)
+                    )
+                    N1.sendTo(underTest) {
+                        RaftRpc.RequestVoteResponse(term = 1L, voteGranted = true)
+                    }
+                    N2 shouldReceive RaftMessage(
+                        from = underTest.id,
+                        to = N2.id,
+                        rpc = RaftRpc.RequestVote(1L, underTest.id, LogEntryMetadata.ZERO)
+                    )
+                    N2.sendTo(underTest) {
+                        RaftRpc.RequestVoteResponse(term = 1L, voteGranted = true)
+                    }
+                    failOnTimeout("timeout waiting for leader", 1.seconds) {
+                        underTest.roleChanges.first { it == RaftRole.LEADER }
+                    }
+                    N1.receive() // heartbeat
+
+                    // Send an AppendEntries with a higher term
                     N1.sendTo(underTest) {
                         AppendEntries(
-                            term = 1L,
+                            term = underTest.getCurrentTerm() + 1,
                             leaderId = N1.id,
-                            prevLog = LogEntryMetadata(index = 1, term = 1),
+                            prevLog = LogEntryMetadata.ZERO,
                             entries = emptyList(),
                             leaderCommit = 0L
                         )
@@ -95,63 +133,9 @@ class RaftMachineTest : FunSpec({
                     N1 shouldReceive RaftMessage(
                         from = underTest.id,
                         to = N1.id,
-                        rpc = AppendEntriesResponse(
-                            term = 1L,
-                            matchIndex = 1,
-                            success = false,
-                            entries = 0
-                        )
+                        rpc = AppendEntriesResponse(underTest.getCurrentTerm() + 1, 0, true, 0)
                     )
-                }
-                test("should reject AppendEntries when the prevLog term does not match") {
-                    underTest.reboot {
-                        term = 1L
-                        +"Hello World"
-                    }
-                    N1.sendTo(underTest) {
-                        AppendEntries(
-                            term = 1L,
-                            leaderId = N1.id,
-                            prevLog = LogEntryMetadata(1, 2),
-                            entries = listOf(entry(term = 3, command = "Hello World")),
-                            leaderCommit = 0L
-                        )
-                    }
-                    N1 shouldReceive RaftMessage(underTest.id, N1.id, AppendEntriesResponse(1L, 1, false, 0))
-                }
-                test("should start election for next term after the election timeout") {
-                    underTest.reboot { term = 0L }
-                    N1 shouldReceive RaftMessage(
-                        underTest.id,
-                        N1.id,
-                        RaftRpc.RequestVote(1L, underTest.id, LogEntryMetadata.ZERO)
-                    )
-                    N2 shouldReceive RaftMessage(
-                        underTest.id,
-                        N2.id,
-                        RaftRpc.RequestVote(1L, underTest.id, LogEntryMetadata.ZERO)
-                    )
-                }
-            }
-            context("RequestVote RPC") {
-
-                test("Given a node in candidate state When it receives a RequestVote for same term Then should reject it") {
-                    underTest.reboot {
-                        term = 0L
-                    }
-                    N1 shouldReceive RaftMessage(
-                        underTest.id,
-                        N1.id,
-                        RaftRpc.RequestVote(1L, underTest.id, LogEntryMetadata.ZERO)
-                    )
-                    N1.sendTo(underTest) {
-                        RaftRpc.RequestVote(
-                            1L,
-                            N1.id,
-                            LogEntryMetadata.ZERO
-                        )
-                    }
-                    N1.receive() shouldBe RaftMessage(underTest.id, N1.id, RaftRpc.RequestVoteResponse(1L, false))
+                    underTest.roleChanges.first() shouldBe RaftRole.FOLLOWER
                 }
             }
         }
@@ -162,7 +146,7 @@ class RaftMachineTest : FunSpec({
         // 'refs' is a map with the id and transport for each node
         val refs = (1..3).map { "N$it" }
 
-        test("There should be at least one leader") {
+        test("A leader should be elected") {
             resourceScope {
                 val scope = installCoroutine()
                 val clusterNetwork = installRaftClusterNetwork()
@@ -178,18 +162,17 @@ class RaftMachineTest : FunSpec({
                         )
                     }
                 )
-                cluster.awaitLeader()
+                assertNotNull(cluster.awaitLeaderElected())
             }
         }
-        test("If the leader is disconnected, a new leader should be elected") {
+        test("When the leader is disconnected, a new leader should be elected") {
             resourceScope {
-                val scope = installCoroutine()
                 val clusterNetwork = installRaftClusterNetwork()
                 val cluster = installRaftTestCluster(
-                    scope = scope,
+                    scope = installCoroutine(),
                     network = clusterNetwork,
                     nodeIds = refs,
-                    config = { _ ->
+                    config = {
                         RaftMachine.Configuration(
                             maxLogEntriesPerAppend = 4,
                             leaderElectionTimeoutMs = 300L,
@@ -197,21 +180,21 @@ class RaftMachineTest : FunSpec({
                         )
                     }
                 )
-                val initialLeader = cluster.awaitLeader()
+                val initialLeader = cluster.awaitLeaderElected()
                 val initialTerm = initialLeader.getCurrentTerm()
                 logger.info(entry("initial_leader", "term" to initialTerm, "id" to initialLeader.id))
+
                 initialLeader.disconnect()
-                val newLeader = try {
-                    cluster.awaitLeaderChangeFrom(initialLeader.id)
-                } finally {
-                    initialLeader.reconnect()
-                }
-                newLeader shouldNotBe initialLeader
+                val newLeader = cluster.awaitDifferentLeaderElected(initialLeader.id)
+                initialLeader.reconnect()
+
+                newLeader.id shouldNotBe initialLeader.id
                 newLeader.getCurrentTerm() shouldBeGreaterThan initialTerm
                 cluster.awaitLogConvergence()
+                initialLeader.isLeader shouldBe false
             }
         }
-        test("When append is signaled committed, it should be saved in majority of nodes") {
+        test("When append is signaled committed, it should be present in majority of nodes") {
             resourceScope {
                 val scope = installCoroutine()
                 val clusterNetwork = installRaftClusterNetwork()
@@ -227,11 +210,11 @@ class RaftMachineTest : FunSpec({
                         )
                     }
                 )
-                val leader = cluster.awaitLeader()
-                withTimeoutOrNull(400.milliseconds) {
+                val leader = cluster.awaitLeaderElected()
+                failOnTimeout("timeout waiting for command to be processed", 400.milliseconds) {
                     leader.raftMachine.command("Hello World".encodeToByteArray())
                         .join()
-                } ?: error("timeout waiting for command to be processed")
+                }
                 val stored = cluster.nodes
                     .map { it.log.getLastIndex() }
                     .count { it == 1L }
@@ -239,50 +222,8 @@ class RaftMachineTest : FunSpec({
                 stored shouldBeGreaterThan cluster.nodes.size / 2
             }
         }
-        test("Append a batch of messages in the log") {
-            resourceScope {
-                val scope = installCoroutine()
-                val clusterNetwork = installRaftClusterNetwork()
-                val cluster = installRaftTestCluster(
-                    scope = scope,
-                    network = clusterNetwork,
-                    nodeIds = refs,
-                    config = { _ ->
-                        RaftMachine.Configuration(
-                            maxLogEntriesPerAppend = 4,
-                            leaderElectionTimeoutMs = 300L,
-                            leaderElectionTimeoutJitterMs = 200,
-                        )
-                    }
-                )
-                val leader = cluster.awaitLeader()
-                val startIndex = leader.commitIndex + 1
-                withTimeoutOrNull(5.seconds) {
-                    leader.raftMachine.command(
-                        "Hey Jude".encodeToByteArray(),
-                        "Don't make it bad".encodeToByteArray(),
-                        "Take a sad song".encodeToByteArray(),
-                        "And make it better".encodeToByteArray()
-                    ).join()
-                } ?: error("timeout waiting for commands to be processed")
-                cluster.nodes.forEach { n ->
-                    launch {
-                        val messages = n.log.getEntries(startIndex, 10)
-                            .map { it.command.decodeToString() }
-                        logger.info(entry("check-log", "from-index" to startIndex, "messages" to messages))
 
-                        messages shouldBe listOf(
-                            "Hey Jude",
-                            "Don't make it bad",
-                            "Take a sad song",
-                            "And make it better"
-                        )
-                    }
-                }
-            }
-        }
-
-        test("Node replace uncommitted content when receiving an append for a previous entry") {
+        test("A disconnected leader should replace non-committed entries with the new leader's log") {
             resourceScope {
                 val scope = installCoroutine()
                 val clusterNetwork = installRaftClusterNetwork()
@@ -299,18 +240,18 @@ class RaftMachineTest : FunSpec({
                     }
                 )
                 // Elect a leader
-                val leader = cluster.awaitLeader()
+                val leader = cluster.awaitLeaderElected()
                 val firstCmdIndex = leader.commitIndex + 1
 
                 // Append a command to the leader
-                val committed = leader.raftMachine.command("TV Series: Breaking Bad".encodeToByteArray())
+                val committed = leader.raftMachine.command("First_entry_for_everyone".encodeToByteArray())
                 assertNotNull(committed).join()
 
                 // Disconnect the leader from the cluster
                 leader.disconnect()
 
                 // A new leader should be elected
-                val newLeader = cluster.awaitLeaderChangeFrom(leader.id)
+                val newLeader = cluster.awaitDifferentLeaderElected(leader.id)
                 logger.info(
                     entry(
                         "new_leader",
@@ -322,10 +263,10 @@ class RaftMachineTest : FunSpec({
 
                 // Append a command to the old leader
                 @Suppress("UNUSED_VARIABLE")
-                val oldLeaderCommitted = leader.raftMachine.command("TV Series: The Wire".encodeToByteArray())
+                val oldLeaderCommitted = leader.raftMachine.command("Entry_to_be_replaced".encodeToByteArray())
                 // And a list of commands to the new leader
                 val newLeaderCommitted = newLeader.raftMachine
-                    .command("TV Series: The Sopranos".encodeToByteArray(), "TV Series: Sherlock".encodeToByteArray())
+                    .command("New_entry_1".encodeToByteArray(), "New_entry_2".encodeToByteArray())
                 "await_old_leader_appended"
                     .await coUntil { leader.getLastEntryMetadata().index > firstCmdIndex }
 
@@ -343,9 +284,9 @@ class RaftMachineTest : FunSpec({
 //                }
                 // after the old leader re-join the cluster, it should have the same logs as the new leader
                 val expectedLogs = listOf(
-                    "TV Series: Breaking Bad",
-                    "TV Series: The Sopranos",
-                    "TV Series: Sherlock"
+                    "First_entry_for_everyone",
+                    "New_entry_1",
+                    "New_entry_2"
                 )
                 cluster.nodes.forEach { n ->
                     val logs = n.log.getEntries(firstCmdIndex, 4)
@@ -368,7 +309,7 @@ class RaftMachineTest : FunSpec({
                     scope = scope,
                     network = clusterNetwork,
                     nodeIds = refs,
-                    config = { _ ->
+                    config = {
                         RaftMachine.Configuration(
                             maxLogEntriesPerAppend = 4,
                             leaderElectionTimeoutMs = 200L,
@@ -381,35 +322,18 @@ class RaftMachineTest : FunSpec({
                 // C clients sending B batches of M messages each
                 val C = 8
                 val B = 15
-                val M = 3
+                val M = 5
 
                 coroutineScope {
                     val clientsSendingEntriesJob = launch {
-                        ('A'..('A' + C)).forEach { client ->
-                            launch(Dispatchers.IO) {
-                                val messages = generateSequence(1, Int::inc)
-                                    .map { m -> "$client-$m" }
-                                    .iterator()
-                                repeat(B) { // batches
-                                    val batch = messages.asSequence()
-                                        .take(M)
-                                        .map { it.encodeToByteArray() }
-                                        .toList()
-                                    @Suppress("DeferredResultUnused")
-                                    cluster.awaitLeader(5.seconds).apply {
-                                        raftMachine.command(batch)
-                                        delay(40)
-                                    }
-                                }
-                            }
-                        }
+                        startClientsSendingBatches(C, B, M, cluster)
                     }
                     launch {
-                        // Randomly disconnect a node
+                        // Randomly disconnect the leader
                         do {
-                            cluster.awaitLeader(5.seconds).apply {
+                            cluster.awaitLeaderElected(timeout = 5.seconds).apply {
                                 disconnect()
-                                cluster.awaitLeaderChangeFrom(id, timeout = 5.seconds)
+                                cluster.awaitDifferentLeaderElected(id, timeout = 5.seconds)
                                 delay(configuration.heartbeatTimeoutMs * Random.nextLong(3, 10))
                                 reconnect()
                             }
@@ -445,11 +369,37 @@ class RaftMachineTest : FunSpec({
     }
 })
 
+private fun CoroutineScope.startClientsSendingBatches(
+    clients: Int,
+    batches: Int,
+    messagesPerBatch: Int,
+    cluster: RaftTestCluster
+) {
+    ('A'..('A' + clients)).forEach { client ->
+        launch(Dispatchers.IO) {
+            val messages = generateSequence(1, Int::inc)
+                .map { m -> "$client-$m" }
+                .iterator()
+            repeat(batches) { // batches
+                val batch = messages.asSequence()
+                    .take(messagesPerBatch)
+                    .map { it.encodeToByteArray() }
+                    .toList()
+                @Suppress("DeferredResultUnused")
+                cluster.awaitLeaderElected(5.seconds).apply {
+                    raftMachine.command(batch)
+                    delay(40)
+                }
+            }
+        }
+    }
+}
+
 
 /**
  * Make the [RaftTestNode] receive a message from the [RaftClusterNode]
  */
-suspend fun RaftClusterNode.sendTo(to: RaftTestNode, rpc: () -> RaftRpc) {
+suspend inline fun RaftClusterNode.sendTo(to: RaftTestNode, rpc: () -> RaftRpc) {
     send(to.id, rpc())
 }
 

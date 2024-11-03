@@ -1,11 +1,11 @@
 package io.r.raft.machine
 
-import io.r.raft.protocol.Index
 import io.r.raft.protocol.NodeId
 import io.r.raft.protocol.RaftMessage
 import io.r.raft.protocol.RaftRpc
 import io.r.raft.protocol.RaftRole
 import io.r.raft.log.RaftLog
+import io.r.raft.log.RaftLog.Companion.getLastMetadata
 import io.r.raft.transport.RaftClusterNode
 import io.r.raft.transport.RaftClusterNode.Companion.quorum
 import io.r.utils.logs.entry
@@ -14,7 +14,7 @@ import org.apache.logging.log4j.Logger
 import kotlin.math.floor
 
 class Candidate(
-    override var commitIndex: Index,
+    override val serverState: ServerState,
     val configuration: RaftMachine.Configuration,
     override val log: RaftLog,
     override val clusterNode: RaftClusterNode,
@@ -25,7 +25,6 @@ class Candidate(
 
     override suspend fun onEnter() {
         val nextTerm = log.getTerm() + 1
-        val lastIndex = log.getLastIndex()
         log.setTerm(nextTerm)
         votesReceived += clusterNode.id
         logger.debug(entry("Starting_Election", "term" to nextTerm))
@@ -35,7 +34,7 @@ class Candidate(
                 rpc = RaftRpc.RequestVote(
                     log.getTerm(),
                     clusterNode.id,
-                    checkNotNull(log.getMetadata(lastIndex)) { "Metadata for lastIndex must always be available" }
+                    log.getLastMetadata()
                 )
             )
         }

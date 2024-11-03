@@ -1,6 +1,7 @@
 package io.r.raft.machine
 
 import io.r.raft.log.RaftLog
+import io.r.raft.log.RaftLog.Companion.AppendResult
 import io.r.raft.log.RaftLog.Companion.getLastMetadata
 import io.r.raft.protocol.Index
 import io.r.raft.protocol.RaftMessage
@@ -12,7 +13,7 @@ import org.apache.logging.log4j.LogManager
 import org.apache.logging.log4j.Logger
 
 class Follower(
-    override var commitIndex: Index,
+    override val serverState: ServerState,
     val configuration: RaftMachine.Configuration,
     override val log: RaftLog,
     override val clusterNode: RaftClusterNode,
@@ -34,21 +35,17 @@ class Follower(
             )
         }
         is RaftRpc.AppendEntries -> {
+            @Suppress("IMPLICIT_CAST_TO_ANY")
             val result = when {
-                message.rpc.term < log.getTerm() -> "TermMismatch"
-                message.rpc.prevLog.index < 0L -> "Previous index must be greater than 0"
-                else -> when (val metadata = log.getMetadata(message.rpc.prevLog.index)) {
-                    message.rpc.prevLog -> log.append(message.rpc.prevLog.index, message.rpc.entries)
-                    null -> "PreviousIndexNotFound"
-                    else -> "PreviousIndexMismatch expected=${message.rpc.prevLog} actual=$metadata"
-                }
+                message.rpc.term < log.getTerm() -> "Leader is behind"
+                else -> log.append(message.rpc.prevLog, message.rpc.entries)
             }
             val rcp = when (result) {
-                is Index -> {
-                    commitIndex = message.rpc.leaderCommit
+                is AppendResult.Appended -> {
+                    serverState.commitIndex = message.rpc.leaderCommit
                     RaftRpc.AppendEntriesResponse(
                         term = log.getTerm(),
-                        matchIndex = result,
+                        matchIndex = result.index,
                         success = true,
                         entries = message.rpc.entries.size
                     )

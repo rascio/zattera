@@ -1,9 +1,9 @@
 package io.r.raft.machine
 
 import io.r.raft.log.RaftLog
+import io.r.raft.log.RaftLog.Companion.getLastMetadata
 import io.r.raft.log.StateMachine
 import io.r.raft.log.StateMachine.Companion.apply
-import io.r.raft.protocol.Index
 import io.r.raft.protocol.LogEntry
 import io.r.raft.protocol.RaftMessage
 import io.r.raft.protocol.RaftRole
@@ -22,6 +22,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.merge
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
@@ -41,13 +42,23 @@ class RaftMachine(
 ) {
 
     private val logger: Logger = LogManager.getLogger("${this::class.java}.${cluster.id}")
-    private val _role: MutableStateFlow<Role> = MutableStateFlow(createFollower(0))
+    private val _role: MutableStateFlow<Role> = MutableStateFlow(
+        createFollower(ServerState(0, 0))
+    )
     private var job: Job? = null
     private val mutex = Mutex()
     private val waitingForCommit = ConcurrentHashMap<String, CompletableDeferred<Unit>>()
 
-    val commitIndex get() = _role.value.commitIndex
+    val commitIndex get() = _role.value.serverState.commitIndex
     val isLeader: Boolean get() = _role.value is Leader
+    val role
+        get() = _role.map {
+            when (it) {
+                is Follower -> RaftRole.FOLLOWER
+                is Candidate -> RaftRole.CANDIDATE
+                is Leader -> RaftRole.LEADER
+            }
+        }
 
     private sealed interface Step
 
@@ -107,7 +118,7 @@ class RaftMachine(
             val term = log.getTerm()
             val entry = LogEntry(term, command)
             val result = CompletableDeferred<Unit>()
-            log.append(log.getLastIndex(), listOf(entry))
+            log.append(log.getLastMetadata(), listOf(entry))
             logger.info(entry("command_sent", "term" to term, "command" to entry))
             waitingForCommit[entry.id] = result
             scope.launch {
@@ -126,17 +137,17 @@ class RaftMachine(
 
     private suspend fun applyCommittedEntries() {
         val lastApplied = stateMachine.getLastApplied()
-        if (_role.value.commitIndex > lastApplied) {
+        if (_role.value.serverState.commitIndex > lastApplied) {
             val entries = log.getEntries(
                 from = lastApplied + 1,
-                length = (_role.value.commitIndex - lastApplied).toInt()
+                length = (_role.value.serverState.commitIndex - lastApplied).toInt()
             )
             logger.debug(
                 entry(
                     "Applying_Committed",
                     "entries" to entries.size,
                     "lastApplied" to lastApplied,
-                    "commitIndex" to _role.value.commitIndex
+                    "commitIndex" to _role.value.serverState.commitIndex
                 )
             )
             stateMachine.apply(entries)
@@ -196,8 +207,8 @@ class RaftMachine(
         val pendingCommandsTimeout: Long = 3000
     )
 
-    private fun createFollower(lastCommit: Index = _role.value.commitIndex) = Follower(
-        lastCommit,
+    private fun createFollower(serverState: ServerState = _role.value.serverState) = Follower(
+        serverState,
         configuration,
         log,
         cluster,
@@ -205,7 +216,7 @@ class RaftMachine(
     )
 
     private fun createCandidate() = Candidate(
-        _role.value.commitIndex,
+        _role.value.serverState,
         configuration,
         log,
         cluster,
@@ -213,7 +224,7 @@ class RaftMachine(
     )
 
     private fun createLeader() = Leader(
-        _role.value.commitIndex,
+        _role.value.serverState,
         log,
         cluster,
         ::changeRole,

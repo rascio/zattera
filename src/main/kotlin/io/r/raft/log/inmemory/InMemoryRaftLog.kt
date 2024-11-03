@@ -7,6 +7,7 @@ import io.r.raft.protocol.LogEntryMetadata
 import io.r.raft.protocol.NodeId
 import io.r.raft.protocol.Term
 import io.r.raft.log.RaftLog
+import io.r.raft.log.RaftLog.Companion.AppendResult
 import io.r.utils.concurrency.ReadWriteLock
 import io.r.utils.logs.entry
 import org.apache.logging.log4j.LogManager
@@ -21,13 +22,11 @@ class InMemoryRaftLog(
 ) : RaftLog {
 
     private val lock = ReadWriteLock()
-    private val log: NavigableMap<Index, LogEntry> = TreeMap(log)
+    private val log: NavigableMap<Index, LogEntry> = TreeMap(log).apply {
+        put(0, LogEntry(0, ByteArray(0)))
+    }
     private val term = AtomicRef(term)
     private val votedFor = AtomicRef(votedFor)
-
-    init {
-        logger.info(entry("InMemoryRaftLog_Initialized", "log" to log.size, "term" to term, "votedFor" to votedFor))
-    }
 
     override suspend fun getLastIndex(): Index = lock.withReadLock {
         return getLastIndexInternal()
@@ -59,14 +58,21 @@ class InMemoryRaftLog(
             .toList()
     }
 
-    override suspend fun append(previous: Index, entries: List<LogEntry>): Index = lock.withWriteLock {
-        entries.forEachIndexed { i, entry ->
-            log[previous + i + 1] = entry
+    override suspend fun append(previous: LogEntryMetadata, entries: List<LogEntry>): AppendResult = lock.withWriteLock {
+        val actual = log[previous.index]
+        when {
+            actual == null -> AppendResult.IndexNotFound
+            actual.term != previous.term -> AppendResult.EntryMismatch
+            else -> {
+                entries.forEachIndexed { i, entry ->
+                    log[previous.index + i + 1] = entry
+                }
+                if (previous.index + entries.size < getLastIndexInternal()) {
+                    log.tailMap(previous.index + entries.size, false).clear()
+                }
+                AppendResult.Appended(getLastIndexInternal())
+            }
         }
-        if (previous + entries.size < getLastIndexInternal()) {
-            log.tailMap(previous + entries.size, false).clear()
-        }
-        return getLastIndexInternal()
     }
 
     override suspend fun setVotedFor(nodeId: NodeId) {
@@ -76,11 +82,8 @@ class InMemoryRaftLog(
     override suspend fun getVotedFor(): NodeId? {
         return votedFor.get()
     }
-    // DAMN KOTLIN NOT REENTRANT MUTEX!
-    private fun getLastIndexInternal() = when {
-        log.isEmpty() -> 0
-        else -> log.lastKey()
-    }
+
+    private fun getLastIndexInternal() = log.size.toLong() - 1
 
     companion object {
         private val logger: Logger = LogManager.getLogger(InMemoryRaftLog::class.java)

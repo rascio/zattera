@@ -247,7 +247,7 @@ class LeaderTest : FunSpec({
                         )
                     )
                 )
-                leader.commitIndex shouldBe N
+                leader.serverState.commitIndex shouldBe N
             }
         }
 
@@ -347,7 +347,7 @@ class LeaderTest : FunSpec({
         ) = install(
             acquire = {
                 Leader(
-                    commitIndex = commitIndex ?: log.getLastIndex(),
+                    serverState = ServerState(commitIndex ?: log.getLastIndex(), 0),
                     log = log,
                     clusterNode = InMemoryRaftClusterNode("UnderTest", peers),
                     changeRole = changeRoleFn,

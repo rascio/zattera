@@ -10,6 +10,7 @@ import io.r.raft.protocol.RaftRpc.AppendEntriesResponse
 import io.r.raft.protocol.RaftRole
 import io.r.raft.log.RaftLog.Companion.getLastMetadata
 import io.r.raft.test.RaftLogBuilderScope.Companion.raftLog
+import io.r.raft.test.installChannel
 import io.r.raft.test.shouldReceive
 import io.r.raft.transport.inmemory.InMemoryRaftClusterNode
 import kotlinx.coroutines.channels.Channel
@@ -21,14 +22,8 @@ class FollowerTest : FunSpec({
 
     context("A node in Follower state") {
         resourceScope {
-            val N1 = install(
-                acquire = { Channel<RaftMessage>(capacity = Channel.UNLIMITED) },
-                release = { c, _ -> c.close() }
-            )
-            val N2 = install(
-                acquire = { Channel<RaftMessage>(capacity = Channel.UNLIMITED) },
-                release = { c, _ -> c.close() }
-            )
+            val N1 = installChannel<RaftMessage>()
+            val N2 = installChannel<RaftMessage>()
             val clusterNode = InMemoryRaftClusterNode("UnderTest", mapOf("N1" to N1, "N2" to N2))
             val log = raftLog {
                 term = 0L
@@ -37,7 +32,7 @@ class FollowerTest : FunSpec({
             }
             val (changeRoleFn, probe) = mockRoleTransition()
             val underTest = Follower(
-                commitIndex = 0,
+                serverState = ServerState(0L, 0L),
                 log = log,
                 clusterNode = clusterNode,
                 changeRole = changeRoleFn,
@@ -94,8 +89,30 @@ class FollowerTest : FunSpec({
                     )
                     log.setTerm(log.getTerm())
                 }
+                test("should not grant the vote for another node when receiving a RequestVote with smaller term") {
+                    val electionTerm = log.getTerm()
+                    underTest.onReceivedMessage(
+                        RaftMessage(
+                            from = "N2",
+                            to = "UnderTest",
+                            rpc = RaftRpc.RequestVote(
+                                term = electionTerm - 1,
+                                candidateId = "N2",
+                                lastLog = log.getLastMetadata()
+                            )
+                        )
+                    )
+                    N2 shouldReceive RaftMessage(
+                        from = "UnderTest",
+                        to = "N2",
+                        rpc = RaftRpc.RequestVoteResponse(
+                            term = electionTerm,
+                            voteGranted = false
+                        )
+                    )
+                }
 
-                test("should reply false when the term is smaller") {
+                test("should reject AppendEntries false when the term is smaller") {
                     val prevLog = log.getLastMetadata()
                     val smallerTerm = log.getTerm() - 1
                     underTest.onReceivedMessage(
@@ -122,7 +139,7 @@ class FollowerTest : FunSpec({
                         )
                     )
                 }
-                test("should reply reject AppendEntries when the prevLog index is not found") {
+                test("should reject AppendEntries when the prevLog index is not found") {
                     val missingLog = LogEntryMetadata(index = log.getLastIndex() + 1, term = 1)
                     val term = log.getTerm()
                     underTest.onReceivedMessage(

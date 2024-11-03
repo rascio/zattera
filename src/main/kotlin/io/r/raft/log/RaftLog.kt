@@ -45,7 +45,7 @@ interface RaftLog {
      * @param entries the entries to append
      * @return the index of the last entry in the log
      */
-    suspend fun append(previous: Index, entries: List<LogEntry>): Index
+    suspend fun append(previous: LogEntryMetadata, entries: List<LogEntry>): AppendResult
 
     /**
      * Append a single entry to the log
@@ -62,5 +62,11 @@ interface RaftLog {
             getEntries(index, 1).firstOrNull()
         suspend fun RaftLog.getLastMetadata(): LogEntryMetadata =
             checkNotNull(getMetadata(getLastIndex())) { "Metadata of last index must not be null" }
+
+        sealed interface AppendResult {
+            data class Appended(val index: Index) : AppendResult
+            data object EntryMismatch : AppendResult
+            data object IndexNotFound : AppendResult
+        }
     }
 }

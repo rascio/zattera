@@ -1,12 +1,12 @@
 package io.r.raft.machine
 
+import io.r.raft.log.RaftLog
 import io.r.raft.protocol.Index
 import io.r.raft.protocol.LogEntryMetadata
 import io.r.raft.protocol.NodeId
 import io.r.raft.protocol.RaftMessage
-import io.r.raft.protocol.RaftRpc
 import io.r.raft.protocol.RaftRole
-import io.r.raft.log.RaftLog
+import io.r.raft.protocol.RaftRpc
 import io.r.raft.transport.RaftClusterNode
 import io.r.raft.transport.RaftClusterNode.Companion.quorum
 import io.r.utils.logs.entry
@@ -21,7 +21,7 @@ import kotlinx.coroutines.launch
 import org.apache.logging.log4j.LogManager
 
 class Leader(
-    override var commitIndex: Index,
+    override val serverState: ServerState,
     override val log: RaftLog,
     override val clusterNode: RaftClusterNode,
     override val changeRole: suspend (RaftRole) -> Role,
@@ -29,6 +29,7 @@ class Leader(
     private val configuration: RaftMachine.Configuration,
     private val peers: MutableMap<NodeId, PeerState> = mutableMapOf()
 ) : Role() {
+
     private var heartbeat: Job? = null
 
     override suspend fun onEnter() {
@@ -70,7 +71,7 @@ class Leader(
             is RaftRpc.AppendEntriesResponse -> {
                 updatePeerMetadata(message.from, message.rpc)
                 // Update commit index, this needs to be done after updating the peer metadata
-                commitIndex = getQuorum()
+                serverState.commitIndex = getQuorum()
                 getNextBatch(message.from, message.rpc)?.let { (prev, entries) ->
                     clusterNode.send(
                         message.from,
@@ -79,7 +80,7 @@ class Leader(
                             leaderId = clusterNode.id,
                             prevLog = prev,
                             entries = entries,
-                            leaderCommit = commitIndex
+                            leaderCommit = serverState.commitIndex
                         )
                     )
                 }
@@ -116,7 +117,7 @@ class Leader(
     private suspend fun getQuorum(): Index {
         val currentTerm = log.getTerm()
         peers.maxOf { (_, s) -> s.matchIndex }
-            .let { (commitIndex + 1..it) }
+            .let { (serverState.commitIndex + 1..it) }
             .reversed()
             .forEach { index ->
                 if (currentTerm != log.getMetadata(index)?.term) {
@@ -127,14 +128,14 @@ class Leader(
                     return index
                 }
             }
-        return commitIndex
+        return serverState.commitIndex
     }
 
     private suspend fun getNextBatch(from: NodeId, message: RaftRpc.AppendEntriesResponse) =
         checkNotNull(peers[from]) { "Peer not found $from" }
             // Only send the next batch if the matchIndex is the same as the one we are expecting
             // and the matchIndex is less than the commitIndex (follower is behind)
-            .takeIf { message.matchIndex == it.matchIndex && message.matchIndex < commitIndex }
+            .takeIf { message.matchIndex == it.matchIndex && message.matchIndex < serverState.commitIndex }
             ?.let { (nextIndex) ->
                 val previous = log.getMetadata(nextIndex - 1)
 
@@ -181,7 +182,7 @@ class Leader(
                 prevLog = log.getMetadata(nextIndex - 1)
                     ?: LogEntryMetadata.ZERO,
                 entries = entries,
-                leaderCommit = commitIndex
+                leaderCommit = serverState.commitIndex
             )
         )
     }
