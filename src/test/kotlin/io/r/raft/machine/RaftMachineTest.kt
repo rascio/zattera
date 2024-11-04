@@ -15,8 +15,8 @@ import io.r.raft.protocol.RaftRpc.AppendEntriesResponse
 import io.r.raft.test.failOnTimeout
 import io.r.raft.test.installCoroutine
 import io.r.raft.transport.RaftClusterNode
-import io.r.utils.awaitility.await
-import io.r.utils.awaitility.coUntil
+import io.r.utils.awaitility.atMost
+import io.r.utils.awaitility.until
 import io.r.utils.logs.entry
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -267,10 +267,14 @@ class RaftMachineTest : FunSpec({
                 // And a list of commands to the new leader
                 val newLeaderCommitted = newLeader.raftMachine
                     .command("New_entry_1".encodeToByteArray(), "New_entry_2".encodeToByteArray())
-                "await_old_leader_appended"
-                    .await coUntil { leader.getLastEntryMetadata().index > firstCmdIndex }
 
-                withTimeout(3.seconds) { newLeaderCommitted.join() }
+                "await_old_leader_appended" atMost 3.seconds until {
+                    leader.getLastEntryMetadata().index > firstCmdIndex
+                }
+
+                failOnTimeout("new_leader_commit", 3.seconds) {
+                    newLeaderCommitted.join()
+                }
                 logger.info("message_replicated_on_2_out_of_3_nodes")
 
                 logger.info("fix_old_leader")
