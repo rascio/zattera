@@ -65,24 +65,25 @@ class RaftMachine(
                 while (isActive) {
                     applyCommittedEntries()
 
+                    val currentRole = _role.value
                     select {
                         cluster.input.onReceive { message ->
                             if (message.rpc.term > log.getTerm()) {
                                 log.setTerm(message.rpc.term)
                                 changeRole(RaftRole.FOLLOWER)
                             }
-                            _role.value.onReceivedMessage(message)
+                            currentRole.onReceivedMessage(message)
                         }
-                        onTimeout(getRoleTimeout()) {
-                            logger.info(entry("Timeout", "role" to _role.value::class.simpleName))
-                            _role.value.onTimeout()
+                        onTimeout(currentRole.timeout) {
+                            logger.debug(entry("Timeout", "role" to currentRole::class.simpleName))
+                            currentRole.onTimeout()
                         }
                     }
                 }
             } finally {
                 _role.value.onExit()
             }
-            logger.info(entry("RaftMachine_Stopped", "role" to _role.value, "term" to log.getTerm()))
+            logger.info(entry("RaftMachine_Stopped", "role" to _role.value::class.simpleName, "term" to log.getTerm()))
         }
     }
 

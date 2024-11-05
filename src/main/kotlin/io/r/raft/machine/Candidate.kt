@@ -12,6 +12,7 @@ import io.r.utils.logs.entry
 import org.apache.logging.log4j.LogManager
 import org.apache.logging.log4j.Logger
 import kotlin.math.floor
+import kotlin.random.Random
 
 class Candidate(
     override val serverState: ServerState,
@@ -20,6 +21,8 @@ class Candidate(
     override val clusterNode: RaftClusterNode,
     override val changeRole: suspend (RaftRole) -> Role
 ) : Role() {
+
+    override val timeout: Long = configuration.leaderElectionTimeoutMs + Random.nextLong(configuration.leaderElectionTimeoutJitterMs)
 
     private val votesReceived = mutableSetOf<NodeId>()
 

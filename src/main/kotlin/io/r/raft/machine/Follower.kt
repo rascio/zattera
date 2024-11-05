@@ -11,6 +11,7 @@ import io.r.raft.transport.RaftClusterNode
 import io.r.utils.logs.entry
 import org.apache.logging.log4j.LogManager
 import org.apache.logging.log4j.Logger
+import kotlin.random.Random
 
 class Follower(
     override val serverState: ServerState,
@@ -19,6 +20,8 @@ class Follower(
     override val clusterNode: RaftClusterNode,
     override val changeRole: RoleTransition
 ) : Role() {
+
+    override val timeout: Long = configuration.leaderElectionTimeoutMs + Random.nextLong(configuration.leaderElectionTimeoutJitterMs)
 
     override suspend fun onReceivedMessage(message: RaftMessage) = when (message.rpc) {
         is RaftRpc.RequestVote -> {

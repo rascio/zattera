@@ -10,6 +10,8 @@ typealias RoleTransition = suspend (RaftRole) -> Role
 data class ServerState(var commitIndex: Index, var lastApplied: Index)
 sealed class Role {
     abstract val serverState: ServerState
+    abstract val timeout: Long
+
     protected abstract val log: RaftLog
     protected abstract val clusterNode: RaftClusterNode
     protected abstract val changeRole: RoleTransition

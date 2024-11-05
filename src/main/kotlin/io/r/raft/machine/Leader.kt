@@ -32,6 +32,8 @@ class Leader(
 
     private var heartbeat: Job? = null
 
+    override val timeout: Long = Long.MAX_VALUE // forever
+
     override suspend fun onEnter() {
         check(heartbeat == null) { "Heartbeat already started" }
         peers += clusterNode.peers
@@ -53,7 +55,6 @@ class Leader(
                     }
                 }
             }
-            logger.debug(entry("Heartbeat_Started"))
         }
         cont.joinAll()
     }
@@ -144,14 +145,6 @@ class Leader(
 
                 checkNotNull(previous) { "Out of sync node=${clusterNode.id} term=${log.getTerm()} peer=$from state=${peers[from]} nextIndex=$nextIndex" }
 
-                logger.debug(
-                    entry(
-                        "Sending_Next_Batch",
-                        "from" to from,
-                        "nextIndex" to nextIndex,
-                        "wasSuccess" to message.success
-                    )
-                )
                 val entries = when {
                     message.success -> log.getEntries(nextIndex, configuration.maxLogEntriesPerAppend)
                     else -> emptyList()
@@ -161,7 +154,6 @@ class Leader(
 
     private fun updatePeerMetadata(from: NodeId, message: RaftRpc.AppendEntriesResponse) {
         peers.computeIfPresent(from) { _, state ->
-            println("updatePeerMetadata: $from, $message, $state")
             when {
                 message.success -> state.copy(
                     nextIndex = message.matchIndex + 1,
@@ -169,22 +161,16 @@ class Leader(
                     lastContactTime = System.currentTimeMillis()
                 )
 
-                message.matchIndex == state.nextIndex - 1 -> {
-                    logger.warn(entry("Rejection", "from" to from, "state" to state, "message" to message))
-                    state.copy(
-                        nextIndex = state.nextIndex - 1,
-                        lastContactTime = System.currentTimeMillis()
-                    )
-                }
+                message.matchIndex == state.nextIndex - 1 -> state.copy(
+                    nextIndex = state.nextIndex - 1,
+                    lastContactTime = System.currentTimeMillis()
+                )
                 // This is a special case where the response is for a previous message
-                // matchIndex is used to determine the last index follower and leader agree
+                // matchIndex is used to determine the last index follower and leader
                 // are talking about
-                else -> {
-                    logger.warn(entry("Mismatched_Message", "from" to from, "state" to state, "message" to message))
-                    state.copy(
-                        lastContactTime = System.currentTimeMillis()
-                    )
-                }
+                else -> state.copy(
+                    lastContactTime = System.currentTimeMillis()
+                )
             }
         }
     }
