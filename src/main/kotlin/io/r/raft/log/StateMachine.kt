@@ -1,18 +1,15 @@
 package io.r.raft.log
 
-import io.r.raft.protocol.Index
 import io.r.raft.protocol.LogEntry
 
 interface StateMachine {
     /**
      * Apply a log entry to the state machine and update the last applied index
      */
-    suspend fun apply(command: LogEntry)
-    suspend fun getLastApplied(): Index
+    suspend fun apply(command: LogEntry): Any
 
     companion object {
-        suspend fun StateMachine.apply(entries: List<LogEntry>) {
-            entries.forEach { apply(it) }
-        }
+        suspend fun StateMachine.apply(entries: List<LogEntry>) =
+            entries.map { apply(it) }
     }
 }

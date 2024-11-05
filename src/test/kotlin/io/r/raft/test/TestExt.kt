@@ -27,7 +27,7 @@ suspend fun ResourceScope.installCoroutine(ctx: CoroutineContext = EmptyCoroutin
     release = { c, _ -> c.cancel() }
 )
 
-suspend fun <T> failOnTimeout(message: String, timeout: Duration, block: suspend () -> T): T = try {
+suspend fun <T> failOnTimeout(message: String = "Timeout", timeout: Duration, block: suspend () -> T): T = try {
     withTimeout(timeout) {
         block()
     }

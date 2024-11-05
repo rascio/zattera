@@ -44,11 +44,11 @@ class KtorRestRaftClusterNode(
 
     private val json = Json
     private val client = HttpClient(CIO)
-    private val messagesFromNodes = Channel<RaftMessage>(capacity = Channel.UNLIMITED)
     private val peersMap = peers.associateBy { it.id } - id
     private val unavailableNodes = ConcurrentSet<NodeId>()
 
     override val peers: Set<NodeId> = peersMap.keys
+    override val input = Channel<RaftMessage>(capacity = Channel.UNLIMITED)
 
     override suspend fun send(to: NodeId, rpc: RaftRpc) {
         client.launch(Dispatchers.IO) {
@@ -76,15 +76,13 @@ class KtorRestRaftClusterNode(
         }
     }
 
-    override suspend fun receive(): RaftMessage = messagesFromNodes.receive()
-
     val endpoints: Route.() -> Unit = {
         route("/{nodeId}") {
             post {
                 checkNotNull(call.parameters["nodeId"])
                 val string = call.receiveText()
                 val message = json.decodeFromString<RaftMessage>(string)
-                messagesFromNodes.send(message)
+                input.send(message)
                 call.respondText(text = "OK", status = HttpStatusCode.Accepted)
             }
         }

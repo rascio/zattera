@@ -4,12 +4,19 @@ import arrow.fx.coroutines.ResourceScope
 import io.r.raft.protocol.NodeId
 import io.r.utils.awaitility.untilNotNull
 import io.r.utils.awaitility.atMost
+import io.r.utils.entry
+import io.r.utils.logs.entry
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
+import kotlinx.coroutines.yield
 import org.apache.logging.log4j.LogManager
 import org.apache.logging.log4j.Logger
+import kotlin.coroutines.resume
+import kotlin.coroutines.suspendCoroutine
 import kotlin.time.Duration
 import kotlin.time.Duration.Companion.seconds
 
@@ -47,33 +54,46 @@ class RaftTestCluster(val nodes: List<RaftTestNode>) {
     /**
      * Wait until the cluster has a consistent state, i.e., all nodes have the same commit index
      */
-    fun awaitLogConvergence(timeout: Duration = 3.seconds) =
-        "await_log_convergence" atMost timeout untilNotNull  {
-            nodes.map { it.commitIndex }
-                .toSet()
-                .takeIf { it.size == 1 }
-                ?.first()
+    suspend fun awaitLogConvergence(timeout: Duration = 3.seconds) {
+        withContext(Dispatchers.IO) {
+            logger.info("waiting_for_log_convergence")
+            "await_log_convergence" atMost timeout untilNotNull {
+                nodes.map { it.commitIndex }
+                    .toSet()
+                    .takeIf { it.size == 1 }
+                    ?.first()
+            }
+            logger.info("log_converged")
         }
+    }
 
     /**
      * Wait until a leader is elected
      */
-    fun awaitLeaderElected(timeout: Duration = 3.seconds) =
-        "await_leader_election" atMost timeout untilNotNull {
-            nodes.filter { it.isLeader }
+    fun awaitLeaderElected(timeout: Duration = 3.seconds): RaftTestNode {
+        logger.info("waiting_for_leader_election")
+        val leader = "await_leader_election" atMost timeout untilNotNull {
+            nodes.filter { it.isLeader() }
                 .toSet()
                 .takeIf { it.size == 1 }
                 ?.first()
         }
+        logger.info(entry("Leader_elected", "leader" to leader.id))
+        return leader
+    }
 
-    fun awaitDifferentLeaderElected(initialLeader: NodeId, timeout: Duration = 3.seconds) =
-        "await_leader_change" atMost timeout untilNotNull {
+    fun awaitDifferentLeaderElected(initialLeader: NodeId, timeout: Duration = 3.seconds): RaftTestNode {
+        logger.info("waiting_for_leader_change")
+        val leader = "await_leader_change" atMost timeout untilNotNull {
             nodes.filter { it.id != initialLeader }
-                .filter { it.isLeader }
+                .filter { it.isLeader() }
                 .toSet()
                 .takeIf { it.size == 1 }
                 ?.first()
         }
+        logger.info(entry("Leader_changed", "leader" to leader.id))
+        return leader
+    }
 }
 
 suspend fun ResourceScope.installRaftTestCluster(

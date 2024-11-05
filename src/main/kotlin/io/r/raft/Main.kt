@@ -2,6 +2,7 @@ package io.r.raft
 
 import arrow.atomic.AtomicLong
 import arrow.fx.coroutines.ResourceScope
+import arrow.fx.coroutines.autoCloseable
 import arrow.fx.coroutines.resourceScope
 import io.ktor.http.HttpStatusCode
 import io.ktor.server.application.Application
@@ -19,8 +20,8 @@ import io.ktor.server.routing.routing
 import io.r.raft.log.StateMachine
 import io.r.raft.log.inmemory.InMemoryRaftLog
 import io.r.raft.machine.RaftMachine
-import io.r.raft.protocol.Index
 import io.r.raft.protocol.LogEntry
+import io.r.raft.transport.RaftClusterNode
 import io.r.raft.transport.ktor.KtorRestRaftClusterNode
 import io.r.raft.transport.ktor.KtorRestRaftClusterNode.RestNodeAddress
 import io.r.raft.transport.utils.LoggingRaftClusterNode
@@ -93,15 +94,27 @@ class RestRaftServer : Callable<String> {
     private suspend fun ResourceScope.execute() = coroutineScope {
         val raftLog = InMemoryRaftLog()
         val raftClusterNode = KtorRestRaftClusterNode(id, peers.map(RestNodeAddress::parse).toSet())
-        val raftMachine = installRaftMachine(raftClusterNode, raftLog, CoroutineScope(Dispatchers.IO))
-        val http = installHttpServer(raftClusterNode, raftMachine, raftLog)
+
+        val raftMachine = installRaftMachine(
+            raftClusterNode = when {
+                debugMessages -> autoCloseable { LoggingRaftClusterNode(raftClusterNode) }
+                else -> raftClusterNode
+            },
+            raftLog = raftLog,
+            coroutineScope = CoroutineScope(Dispatchers.IO)
+        )
+        val http = installHttpServer(
+            raftClusterNode = raftClusterNode,
+            raftMachine = raftMachine,
+            raftLog = raftLog
+        )
         logger.info(entry("Server_started", "id" to id, "port" to port))
         http.start(wait = true)
     }
 
     private suspend fun ResourceScope.installHttpServer(
         raftClusterNode: KtorRestRaftClusterNode,
-        raft: RaftMachine,
+        raftMachine: RaftMachine,
         raftLog: InMemoryRaftLog
     ) = install(
         acquire = {
@@ -109,7 +122,7 @@ class RestRaftServer : Callable<String> {
                 install(CORS) {
                     anyHost()
                 }
-                installRoutes(raftClusterNode, raft, raftLog)
+                installRoutes(raftClusterNode, raftMachine, raftLog)
             }
         },
         release = { it, _ -> it.stop() }
@@ -146,7 +159,7 @@ class RestRaftServer : Callable<String> {
     }
 
     private suspend fun ResourceScope.installRaftMachine(
-        raftClusterNode: KtorRestRaftClusterNode,
+        raftClusterNode: RaftClusterNode,
         raftLog: InMemoryRaftLog,
         coroutineScope: CoroutineScope
     ) = install(
@@ -157,7 +170,7 @@ class RestRaftServer : Callable<String> {
                     leaderElectionTimeoutJitterMs = leaderJitter,
                     heartbeatTimeoutMs = heartbeatTimeout
                 ),
-                cluster = if (debugMessages) LoggingRaftClusterNode(raftClusterNode) else raftClusterNode,
+                cluster = raftClusterNode,
                 log = raftLog,
                 stateMachine = object : StateMachine {
 
@@ -169,7 +182,6 @@ class RestRaftServer : Callable<String> {
                         lastApplied.incrementAndGet()
                     }
 
-                    override suspend fun getLastApplied(): Index = lastApplied.get()
                 },
                 scope = coroutineScope
             ).apply { start() }

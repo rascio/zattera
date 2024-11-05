@@ -4,8 +4,10 @@ import arrow.fx.coroutines.resourceScope
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.matchers.comparables.shouldBeGreaterThan
 import io.kotest.matchers.comparables.shouldBeLessThan
+import io.kotest.matchers.should
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.shouldNotBe
+import io.kotest.matchers.types.shouldBeInstanceOf
 import io.r.raft.protocol.LogEntryMetadata
 import io.r.raft.protocol.RaftMessage
 import io.r.raft.protocol.RaftRole
@@ -20,11 +22,12 @@ import io.r.utils.awaitility.until
 import io.r.utils.logs.entry
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.joinAll
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withTimeout
 import org.apache.logging.log4j.LogManager
 import org.awaitility.Awaitility
 import kotlin.random.Random
@@ -57,37 +60,50 @@ class RaftMachineTest : FunSpec({
 
                     val underTest = installRaftTestNode("UnderTest", network)
 
-                    // Elect underTest as leader
-                    N1 shouldReceive RaftMessage(
-                        from = underTest.id,
-                        to = N1.id,
-                        rpc = RaftRpc.RequestVote(1L, underTest.id, LogEntryMetadata.ZERO)
-                    )
-                    N1.sendTo(underTest) {
-                        RaftRpc.RequestVoteResponse(1L, true)
+                    val n1Voted = launch {
+                        // Elect underTest as leader
+                        N1 shouldReceive RaftMessage(
+                            from = underTest.id,
+                            to = N1.id,
+                            rpc = RaftRpc.RequestVote(1L, underTest.id, LogEntryMetadata.ZERO)
+                        )
+                        N1.sendTo(underTest) {
+                            RaftRpc.RequestVoteResponse(1L, true)
+                        }
                     }
-                    N2 shouldReceive RaftMessage(
-                        from = underTest.id,
-                        to = N2.id,
-                        rpc = RaftRpc.RequestVote(1L, underTest.id, LogEntryMetadata.ZERO)
-                    )
-                    N2.sendTo(underTest) {
-                        RaftRpc.RequestVoteResponse(1L, true)
+                    val n2Voted = launch {
+                        N2 shouldReceive RaftMessage(
+                            from = underTest.id,
+                            to = N2.id,
+                            rpc = RaftRpc.RequestVote(1L, underTest.id, LogEntryMetadata.ZERO)
+                        )
+                        N2.sendTo(underTest) {
+                            RaftRpc.RequestVoteResponse(1L, true)
+                        }
                     }
-                    failOnTimeout("timeout waiting for leader", 1.seconds) {
+                    joinAll(n1Voted, n2Voted)
+                    failOnTimeout("timeout waiting for leader", 50.milliseconds) {
                         underTest.roleChanges.first { it == RaftRole.LEADER }
                     }
+                    N1.input.receive().rpc.shouldBeInstanceOf<AppendEntries>() // discard heartbeat
+                    N2.input.receive().rpc.shouldBeInstanceOf<AppendEntries>() // discard heartbeat
 
                     // Send a RequestVote with a higher term
+                    val newTerm = underTest.getCurrentTerm() + 1
                     N1.sendTo(underTest) {
-                        RaftRpc.RequestVote(underTest.getCurrentTerm() + 1, N1.id, LogEntryMetadata.ZERO)
+                        RaftRpc.RequestVote(newTerm, N1.id, LogEntryMetadata.ZERO)
+                    }
+                    val waitChangeToFollower = launch {
+                        failOnTimeout("timeout waiting for follower", 50.milliseconds) {
+                            underTest.roleChanges.first { it == RaftRole.FOLLOWER }
+                        }
                     }
                     N1 shouldReceive RaftMessage(
                         from = underTest.id,
                         to = N1.id,
-                        rpc = RaftRpc.RequestVoteResponse(underTest.getCurrentTerm() + 1, true)
+                        rpc = RaftRpc.RequestVoteResponse(newTerm, true)
                     )
-                    underTest.roleChanges.first() shouldBe RaftRole.FOLLOWER
+                    waitChangeToFollower.join()
                 }
             }
             test("Should step down when receiving an AppendEntries with a higher term") {
@@ -118,7 +134,7 @@ class RaftMachineTest : FunSpec({
                     failOnTimeout("timeout waiting for leader", 1.seconds) {
                         underTest.roleChanges.first { it == RaftRole.LEADER }
                     }
-                    N1.receive() // heartbeat
+                    N1.input.receive() // heartbeat
 
                     // Send an AppendEntries with a higher term
                     N1.sendTo(underTest) {
@@ -190,8 +206,14 @@ class RaftMachineTest : FunSpec({
 
                 newLeader.id shouldNotBe initialLeader.id
                 newLeader.getCurrentTerm() shouldBeGreaterThan initialTerm
+                val becomeFollower = launch {
+                    initialLeader.roleChanges
+                        .first { it == RaftRole.FOLLOWER }
+                }
                 cluster.awaitLogConvergence()
-                initialLeader.isLeader shouldBe false
+                failOnTimeout("timeout waiting for initial leader to step down", 100.milliseconds) {
+                    becomeFollower.join()
+                }
             }
         }
         test("When append is signaled committed, it should be present in majority of nodes") {
@@ -277,7 +299,6 @@ class RaftMachineTest : FunSpec({
                 }
                 logger.info("message_replicated_on_2_out_of_3_nodes")
 
-                logger.info("fix_old_leader")
                 leader.reconnect()
                 cluster.awaitLogConvergence()
                 // Rejection of client commands is not implemented yet, who knows if it will ever be
@@ -408,5 +429,5 @@ suspend inline fun RaftClusterNode.sendTo(to: RaftTestNode, rpc: () -> RaftRpc) 
 }
 
 private suspend infix fun RaftClusterNode.shouldReceive(expected: RaftMessage) {
-    receive() shouldBe expected
+    input.receive() shouldBe expected
 }

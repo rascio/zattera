@@ -18,7 +18,7 @@ mvn -q exec:java -Dexec.mainClass=io.r.raft.MainKt \
 Start with a normal heartbeat
 ```shell
 mvn -q exec:java -Dexec.mainClass=io.r.raft.MainKt \
--Dexec.args="N1 --port 8081 --peer N1=http://localhost:8081 --peer N3=http://localhost:8083 --election-timeout=500 --heartbeat-timeout=50 --election-jitter=100"
+-Dexec.args="N1 --port 8081 --peer N1=http://localhost:8081 --peer N3=http://localhost:8083 --election-timeout=100 --heartbeat-timeout=30 --election-jitter=30"
 ```
 
 Start a node and kill the entire cluster if it fails
@@ -41,9 +41,9 @@ done
 
 Add an entry to the log
 ```shell
-POST http://localhost:8081/entries -d "Some raw text"
+curl http://localhost:8081/entries -d "Some raw text"
 ```
 Read the log
 ```shell
-GET http://localhost:8081/entries
+curl http://localhost:8081/entries
 ```

@@ -7,23 +7,28 @@ import io.r.raft.protocol.RaftMessage
 import io.r.raft.protocol.RaftRpc
 import io.r.raft.transport.RaftClusterNode
 import io.r.raft.transport.inmemory.InMemoryRaftClusterNode
+import io.r.raft.transport.utils.LoggingRaftClusterNode
 import io.r.utils.logs.entry
 import kotlinx.coroutines.channels.Channel
 import org.apache.logging.log4j.LogManager
 import org.apache.logging.log4j.Logger
 
 suspend fun ResourceScope.installRaftClusterNetwork(vararg nodeIds: NodeId) =
-    autoCloseable { RaftClusterInMemoryNetwork(*nodeIds) }
+    autoCloseable { RaftClusterInMemoryNetwork(this@installRaftClusterNetwork, *nodeIds) }
 
-class RaftClusterInMemoryNetwork(vararg nodeIds: NodeId) : AutoCloseable {
+class RaftClusterInMemoryNetwork(private val scope: ResourceScope, vararg nodeIds: NodeId) : AutoCloseable {
     private val isolatedNodes = mutableSetOf<NodeId>()
     private val nodes = mutableMapOf<NodeId, Channel<RaftMessage>>().apply {
         nodeIds.forEach { id -> put(id, Channel(Channel.UNLIMITED)) }
     }
 
-    fun createNode(name: NodeId): RaftClusterNode {
+    suspend fun createNode(name: NodeId, logging: Boolean = true): RaftClusterNode {
         nodes.computeIfAbsent(name) { Channel(Channel.UNLIMITED) }
-        val clusterNode = InMemoryRaftClusterNode(name, nodes)
+        var clusterNode: RaftClusterNode = InMemoryRaftClusterNode(name, nodes)
+
+        if (logging) {
+            clusterNode = scope.autoCloseable { LoggingRaftClusterNode(clusterNode) }
+        }
         return object : RaftClusterNode by clusterNode {
             override suspend fun send(to: NodeId, rpc: RaftRpc) {
                 when {

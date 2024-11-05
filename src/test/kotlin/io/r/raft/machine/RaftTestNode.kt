@@ -1,20 +1,20 @@
 package io.r.raft.machine
 
 import arrow.fx.coroutines.ResourceScope
-import io.r.raft.protocol.Index
-import io.r.raft.protocol.LogEntry
-import io.r.raft.protocol.LogEntryMetadata
-import io.r.raft.protocol.NodeId
 import io.r.raft.log.RaftLog
 import io.r.raft.log.StateMachine
 import io.r.raft.log.inmemory.InMemoryRaftLog
+import io.r.raft.protocol.LogEntry
+import io.r.raft.protocol.LogEntryMetadata
+import io.r.raft.protocol.NodeId
+import io.r.raft.protocol.RaftRole
 import io.r.raft.test.RaftLogBuilderScope
 import io.r.raft.transport.RaftClusterNode
-import io.r.raft.transport.utils.LoggingRaftClusterNode
 import io.r.utils.logs.entry
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.first
 import org.apache.logging.log4j.LogManager
 import org.apache.logging.log4j.Logger
 import java.util.concurrent.atomic.AtomicReference
@@ -22,14 +22,15 @@ import java.util.concurrent.atomic.AtomicReference
 suspend fun ResourceScope.installRaftTestNode(
     nodeId: NodeId,
     cluster: RaftClusterInMemoryNetwork,
-    configuration: RaftMachine.Configuration = RaftMachine.Configuration()
+    configuration: RaftMachine.Configuration = RaftMachine.Configuration(),
+    startHeartbeat: Boolean = true
 ) = install(
     acquire = {
         RaftTestNode(
             raftClusterInMemoryNetwork = cluster,
             nodeId = nodeId,
             configuration = configuration
-        ).apply { start() }
+        ).apply { if (startHeartbeat) start() }
     },
     release = { n, _ -> n.stop() }
 )
@@ -42,7 +43,7 @@ class RaftTestNode private constructor(
 ) {
     companion object {
         private val logger: Logger = LogManager.getLogger(RaftTestNode::class.java)
-        operator fun invoke(
+        suspend operator fun invoke(
             raftClusterInMemoryNetwork: RaftClusterInMemoryNetwork,
             nodeId: NodeId,
             configuration: RaftMachine.Configuration,
@@ -59,7 +60,6 @@ class RaftTestNode private constructor(
     private val _raftMachine = AtomicReference(
         newRaftMachine()
     )
-    val isLeader: Boolean get() = raftMachine.isLeader
     val commitIndex get() = _raftMachine.get().commitIndex
     val raftMachine: RaftMachine get() = _raftMachine.get()
     val log get() = _log
@@ -68,6 +68,7 @@ class RaftTestNode private constructor(
 
     var stateMachineApplyDelayMs = 0L
 
+    suspend fun isLeader(): Boolean = raftMachine.role.first() == RaftRole.LEADER
     suspend fun getCurrentTerm() = _log.getTerm()
 
     suspend fun reboot(block: RaftLogBuilderScope.() -> Unit) {
@@ -100,7 +101,7 @@ class RaftTestNode private constructor(
     private fun newRaftMachine() = RaftMachine(
         configuration = configuration,
         log = _log,
-        cluster = LoggingRaftClusterNode(raftClusterNode),
+        cluster = raftClusterNode,
         stateMachine = object : StateMachine {
             var applied = 0L
             override suspend fun apply(command: LogEntry) {
@@ -109,8 +110,6 @@ class RaftTestNode private constructor(
                 applied++
             }
 
-            override suspend fun getLastApplied(): Index =
-                applied
         },
         scope = scope
     )

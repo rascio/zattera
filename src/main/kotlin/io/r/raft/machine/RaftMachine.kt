@@ -3,9 +3,7 @@ package io.r.raft.machine
 import io.r.raft.log.RaftLog
 import io.r.raft.log.RaftLog.Companion.getLastMetadata
 import io.r.raft.log.StateMachine
-import io.r.raft.log.StateMachine.Companion.apply
 import io.r.raft.protocol.LogEntry
-import io.r.raft.protocol.RaftMessage
 import io.r.raft.protocol.RaftRole
 import io.r.raft.transport.RaftClusterNode
 import io.r.utils.logs.entry
@@ -13,19 +11,18 @@ import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.emptyFlow
-import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.map
-import kotlinx.coroutines.flow.merge
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.selects.onTimeout
+import kotlinx.coroutines.selects.select
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import org.apache.logging.log4j.LogManager
@@ -47,10 +44,9 @@ class RaftMachine(
     )
     private var job: Job? = null
     private val mutex = Mutex()
-    private val waitingForCommit = ConcurrentHashMap<String, CompletableDeferred<Unit>>()
+    private val waitingForCommit = ConcurrentHashMap<String, CompletableDeferred<Any>>()
 
     val commitIndex get() = _role.value.serverState.commitIndex
-    val isLeader: Boolean get() = _role.value is Leader
     val role
         get() = _role.map {
             when (it) {
@@ -60,12 +56,7 @@ class RaftMachine(
             }
         }
 
-    private sealed interface Step
-
-    @JvmInline
-    private value class MessageReceived(val message: RaftMessage) : Step
-    data object Timeout : Step
-
+    @OptIn(ExperimentalCoroutinesApi::class)
     fun start() {
         logger.info(entry("Starting_RaftMachine", "job" to job))
         job = scope.launch {
@@ -74,21 +65,15 @@ class RaftMachine(
                 while (isActive) {
                     applyCommittedEntries()
 
-                    val step = merge(
-                        getClusterCommand(),
-                        getRoleTimeout()
-                    ).first()
-
-                    when (step) {
-                        is MessageReceived -> {
-                            if (step.message.rpc.term > log.getTerm()) {
-                                log.setTerm(step.message.rpc.term)
+                    select {
+                        cluster.input.onReceive { message ->
+                            if (message.rpc.term > log.getTerm()) {
+                                log.setTerm(message.rpc.term)
                                 changeRole(RaftRole.FOLLOWER)
                             }
-                            _role.value.onReceivedMessage(step.message)
+                            _role.value.onReceivedMessage(message)
                         }
-
-                        Timeout -> {
+                        onTimeout(getRoleTimeout()) {
                             logger.info(entry("Timeout", "role" to _role.value::class.simpleName))
                             _role.value.onTimeout()
                         }
@@ -112,12 +97,12 @@ class RaftMachine(
     }
 
     // very bad implementation
-    suspend fun command(command: ByteArray): Deferred<Unit> {
+    suspend fun command(command: ByteArray): Deferred<Any> {
         return mutex.withLock {
             check(_role.value is Leader) { "Only leader can accept commands" }
             val term = log.getTerm()
             val entry = LogEntry(term, command)
-            val result = CompletableDeferred<Unit>()
+            val result = CompletableDeferred<Any>()
             log.append(log.getLastMetadata(), listOf(entry))
             logger.info(entry("command_sent", "term" to term, "command" to entry))
             waitingForCommit[entry.id] = result
@@ -130,54 +115,44 @@ class RaftMachine(
     }
 
     // very bad implementation
-    private fun releaseCommit(entry: LogEntry) {
+    private fun releaseCommit(entry: LogEntry, result: Any) {
         waitingForCommit.remove(entry.id)
-            ?.complete(Unit)
+            ?.complete(result)
     }
 
     private suspend fun applyCommittedEntries() {
-        val lastApplied = stateMachine.getLastApplied()
-        if (_role.value.serverState.commitIndex > lastApplied) {
+        val serverState = _role.value.serverState
+        val lastApplied = serverState.lastApplied
+        if (serverState.commitIndex > lastApplied) {
             val entries = log.getEntries(
                 from = lastApplied + 1,
-                length = (_role.value.serverState.commitIndex - lastApplied).toInt()
+                length = (serverState.commitIndex - lastApplied).toInt()
             )
             logger.debug(
                 entry(
                     "Applying_Committed",
                     "entries" to entries.size,
                     "lastApplied" to lastApplied,
-                    "commitIndex" to _role.value.serverState.commitIndex
+                    "commitIndex" to serverState.commitIndex
                 )
             )
-            stateMachine.apply(entries)
-            entries.forEach { releaseCommit(it) }
+            entries.forEach {
+                val result = stateMachine.apply(it)
+                releaseCommit(it, result)
+                serverState.lastApplied++
+            }
         }
     }
 
-    private fun getRoleTimeout() = when (_role.value) {
-        is Leader -> emptyFlow()
-        else -> flow {
-            val timeout =
-                configuration.leaderElectionTimeoutMs + Random.nextLong(configuration.leaderElectionTimeoutJitterMs)
-            delay(timeout)
-            emit(Timeout)
-        }
-    }
-
-    private fun getClusterCommand() = flow {
-        val next = cluster.receive()
-        emit(MessageReceived(next))
-    }
+    private fun getRoleTimeout() =
+        configuration.leaderElectionTimeoutMs + Random.nextLong(configuration.leaderElectionTimeoutJitterMs)
 
     suspend fun stop() {
         waitingForCommit.forEach {
-            runCatching { it.value.cancel() }
-                .onFailure { e -> logger.warn(entry("cancel_error", "id" to it.key, "error" to it.value), e) }
+            it.value.cancel()
         }
         waitingForCommit.clear()
         job?.run {
-            logger.debug(entry("Stopping_RaftMachine", "job" to job))
             cancel("Stopping RaftMachine")
             join()
         }
