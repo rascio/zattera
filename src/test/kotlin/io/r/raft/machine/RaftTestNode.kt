@@ -8,7 +8,6 @@ import io.r.raft.protocol.LogEntry
 import io.r.raft.protocol.LogEntryMetadata
 import io.r.raft.protocol.NodeId
 import io.r.raft.protocol.RaftRole
-import io.r.raft.test.RaftLogBuilderScope
 import io.r.raft.transport.RaftClusterNode
 import io.r.utils.logs.entry
 import kotlinx.coroutines.CoroutineScope
@@ -70,13 +69,6 @@ class RaftTestNode private constructor(
 
     suspend fun isLeader(): Boolean = raftMachine.role.first() == RaftRole.LEADER
     suspend fun getCurrentTerm() = _log.getTerm()
-
-    suspend fun reboot(block: RaftLogBuilderScope.() -> Unit) {
-        raftMachine.stop()
-        _log = RaftLogBuilderScope.raftLog(block)
-        _raftMachine.set(newRaftMachine())
-        raftMachine.start()
-    }
 
     suspend fun getLastEntryMetadata(): LogEntryMetadata {
         return _log.getMetadata(_log.getLastIndex())!!

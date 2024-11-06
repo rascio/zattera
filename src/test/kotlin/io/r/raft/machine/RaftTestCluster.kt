@@ -4,7 +4,6 @@ import arrow.fx.coroutines.ResourceScope
 import io.r.raft.protocol.NodeId
 import io.r.utils.awaitility.untilNotNull
 import io.r.utils.awaitility.atMost
-import io.r.utils.entry
 import io.r.utils.logs.entry
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -12,11 +11,8 @@ import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
-import kotlinx.coroutines.yield
 import org.apache.logging.log4j.LogManager
 import org.apache.logging.log4j.Logger
-import kotlin.coroutines.resume
-import kotlin.coroutines.suspendCoroutine
 import kotlin.time.Duration
 import kotlin.time.Duration.Companion.seconds
 
@@ -44,11 +40,6 @@ class RaftTestCluster(val nodes: List<RaftTestNode>) {
             delay(30)
             append(commands)
         }
-    }
-
-    suspend fun reboot() {
-        nodes.forEach { it.reboot { } }
-        logger.info("Cluster_rebooted")
     }
 
     /**
