@@ -151,7 +151,7 @@ class RestRaftServer : Callable<String> {
                 }
                 get {
                     raftLog.getEntries(0, Int.MAX_VALUE)
-                        .joinToString("\n") { it.command.decodeToString() }
+                        .joinToString("\n") { it.entry.decodeToString() }
                         .let { call.respondText(it) }
                 }
             }
@@ -178,7 +178,7 @@ class RestRaftServer : Callable<String> {
 
                     override suspend fun apply(command: LogEntry) {
                         // Do nothing for now
-                        logger.info(entry("Applied", "command" to command.command.decodeToString()))
+                        logger.info(entry("Applied", "command" to command.entry.decodeToString()))
                         lastApplied.incrementAndGet()
                     }
 

@@ -105,7 +105,7 @@ class RaftTestNode private constructor(
         stateMachine = object : StateMachine {
             var applied = 0L
             override suspend fun apply(command: LogEntry) {
-                logger.info(entry("apply", "command" to command.command.decodeToString(), "_node" to id))
+                logger.info(entry("apply", "command" to command.entry.decodeToString(), "_node" to id))
                 delay(stateMachineApplyDelayMs)
                 applied++
             }

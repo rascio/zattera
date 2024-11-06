@@ -6,6 +6,7 @@ import io.r.raft.log.StateMachine
 import io.r.raft.protocol.LogEntry
 import io.r.raft.protocol.RaftRole
 import io.r.raft.transport.RaftClusterNode
+import io.r.utils.encodeBase64
 import io.r.utils.logs.entry
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
@@ -16,6 +17,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.map
@@ -23,12 +25,10 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.selects.onTimeout
 import kotlinx.coroutines.selects.select
-import kotlinx.coroutines.sync.Mutex
-import kotlinx.coroutines.sync.withLock
 import org.apache.logging.log4j.LogManager
 import org.apache.logging.log4j.Logger
+import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
-import kotlin.random.Random
 
 class RaftMachine(
     private val configuration: Configuration,
@@ -38,12 +38,20 @@ class RaftMachine(
     private val scope: CoroutineScope = CoroutineScope(Dispatchers.IO)
 ) {
 
+    private class IncomingRequest(
+        val entry: ByteArray,
+        val response: CompletableDeferred<Any>,
+        val id: String = UUID.randomUUID().toString()
+    )
     private val logger: Logger = LogManager.getLogger("${this::class.java}.${cluster.id}")
     private val _role: MutableStateFlow<Role> = MutableStateFlow(
         createFollower(ServerState(0, 0))
     )
     private var job: Job? = null
-    private val mutex = Mutex()
+    private val incomingRequests = Channel<IncomingRequest>(
+        capacity = Channel.RENDEZVOUS,
+        onUndeliveredElement = { it.response.completeExceptionally(IllegalStateException("RaftMachine is stopped")) },
+    )
     private val waitingForCommit = ConcurrentHashMap<String, CompletableDeferred<Any>>()
 
     val commitIndex get() = _role.value.serverState.commitIndex
@@ -65,18 +73,20 @@ class RaftMachine(
                 while (isActive) {
                     applyCommittedEntries()
 
-                    val currentRole = _role.value
                     select {
                         cluster.input.onReceive { message ->
                             if (message.rpc.term > log.getTerm()) {
                                 log.setTerm(message.rpc.term)
                                 changeRole(RaftRole.FOLLOWER)
                             }
-                            currentRole.onReceivedMessage(message)
+                            _role.value.onReceivedMessage(message)
                         }
-                        onTimeout(currentRole.timeout) {
-                            logger.debug(entry("Timeout", "role" to currentRole::class.simpleName))
-                            currentRole.onTimeout()
+                        onTimeout(_role.value.timeout) {
+                            logger.debug(entry("Timeout", "role" to _role.value::class.simpleName))
+                            _role.value.onTimeout()
+                        }
+                        incomingRequests.onReceive { command ->
+                            dequeueRequest(command)
                         }
                     }
                 }
@@ -97,25 +107,38 @@ class RaftMachine(
         }
     }
 
-    // very bad implementation
     suspend fun command(command: ByteArray): Deferred<Any> {
-        return mutex.withLock {
-            check(_role.value is Leader) { "Only leader can accept commands" }
-            val term = log.getTerm()
-            val entry = LogEntry(term, command)
-            val result = CompletableDeferred<Any>()
-            log.append(log.getLastMetadata(), listOf(entry))
-            logger.info(entry("command_sent", "term" to term, "command" to entry))
-            waitingForCommit[entry.id] = result
-            scope.launch {
-                delay(configuration.pendingCommandsTimeout)
-                waitingForCommit.remove(entry.id)?.cancel("Time out")
+        val entry = IncomingRequest(command, CompletableDeferred())
+        incomingRequests.send(entry)
+        logger.info(
+            entry(
+                "command_sent",
+                "id" to entry.id,
+                "command" to command.encodeBase64()
+            )
+        )
+        return entry.response
+    }
+
+    private suspend fun dequeueRequest(command: IncomingRequest) {
+        when (_role.value) {
+            is Leader -> {
+                val term = log.getTerm()
+                val entry = LogEntry(term = term, entry = command.entry, id = command.id)
+                log.append(log.getLastMetadata(), listOf(entry))
+                waitingForCommit[command.id] = command.response
+
+                scope.launch {
+                    delay(configuration.pendingCommandsTimeout)
+                    waitingForCommit.remove(entry.id)
+                        ?.cancel("Time out")
+                }
             }
-            result
+            else -> command.response
+                .completeExceptionally(IllegalStateException("Only leader can accept commands"))
         }
     }
 
-    // very bad implementation
     private fun releaseCommit(entry: LogEntry, result: Any) {
         waitingForCommit.remove(entry.id)
             ?.complete(result)
@@ -129,15 +152,16 @@ class RaftMachine(
                 from = lastApplied + 1,
                 length = (serverState.commitIndex - lastApplied).toInt()
             )
-            logger.debug(
-                entry(
-                    "Applying_Committed",
-                    "entries" to entries.size,
-                    "lastApplied" to lastApplied,
-                    "commitIndex" to serverState.commitIndex
-                )
-            )
             entries.forEach {
+
+                logger.debug(
+                    entry(
+                        "Applying_Committed",
+                        "entry" to it.id,
+                        "index" to serverState.lastApplied + 1,
+                        "client_handle" to waitingForCommit.contains(it.id)
+                    )
+                )
                 val result = stateMachine.apply(it)
                 releaseCommit(it, result)
                 serverState.lastApplied++
@@ -145,10 +169,8 @@ class RaftMachine(
         }
     }
 
-    private fun getRoleTimeout() =
-        configuration.leaderElectionTimeoutMs + Random.nextLong(configuration.leaderElectionTimeoutJitterMs)
-
     suspend fun stop() {
+        incomingRequests.cancel()
         waitingForCommit.forEach {
             it.value.cancel()
         }
@@ -160,17 +182,15 @@ class RaftMachine(
     }
 
     private suspend fun changeRole(newRole: RaftRole): Role {
-        return mutex.withLock {
-            _role.value.onExit()
-            _role.value = when (newRole) {
-                RaftRole.FOLLOWER -> createFollower()
-                RaftRole.CANDIDATE -> createCandidate()
-                RaftRole.LEADER -> createLeader()
-            }
-            logger.info(entry("role_change", "to" to newRole, "term" to log.getTerm()))
-            _role.value.onEnter()
-            _role.value
+        _role.value.onExit()
+        _role.value = when (newRole) {
+            RaftRole.FOLLOWER -> createFollower()
+            RaftRole.CANDIDATE -> createCandidate()
+            RaftRole.LEADER -> createLeader()
         }
+        logger.info(entry("role_change", "to" to newRole, "term" to log.getTerm()))
+        _role.value.onEnter()
+        return _role.value
     }
 
     data class Configuration(

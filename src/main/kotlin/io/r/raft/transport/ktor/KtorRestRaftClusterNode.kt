@@ -53,15 +53,10 @@ class KtorRestRaftClusterNode(
     override suspend fun send(to: NodeId, rpc: RaftRpc) {
         client.launch(Dispatchers.IO) {
             val address = peersMap[to] ?: error("Unknown node $to")
-            val message = RaftMessage(
-                from = id,
-                to = to,
-                rpc = rpc
-            )
             runCatching {
                 val response = client.post("${address.host}/raft/${id}") {
                     contentType(ContentType.Application.Json)
-                    setBody(json.encodeToString(message))
+                    setBody(json.encodeToString(rpc))
                 }
                 if (response.status != HttpStatusCode.Accepted) {
                     logger.warn(entry("error_sending", "to" to to, "message" to rpc.describe(), "status" to response.status))
@@ -79,10 +74,16 @@ class KtorRestRaftClusterNode(
     val endpoints: Route.() -> Unit = {
         route("/{nodeId}") {
             post {
-                checkNotNull(call.parameters["nodeId"])
+                val nodeId = checkNotNull(call.parameters["nodeId"])
                 val string = call.receiveText()
-                val message = json.decodeFromString<RaftMessage>(string)
-                input.send(message)
+                val message = json.decodeFromString<RaftRpc>(string)
+                input.send(
+                    RaftMessage(
+                        from = nodeId,
+                        to = id,
+                        rpc = message
+                    )
+                )
                 call.respondText(text = "OK", status = HttpStatusCode.Accepted)
             }
         }

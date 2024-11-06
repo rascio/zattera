@@ -4,7 +4,6 @@ import arrow.fx.coroutines.resourceScope
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.matchers.comparables.shouldBeGreaterThan
 import io.kotest.matchers.comparables.shouldBeLessThan
-import io.kotest.matchers.should
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.shouldNotBe
 import io.kotest.matchers.types.shouldBeInstanceOf
@@ -22,7 +21,6 @@ import io.r.utils.awaitility.until
 import io.r.utils.logs.entry
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
@@ -320,9 +318,9 @@ class RaftMachineTest : FunSpec({
                             "check-log",
                             "node" to n.id,
                             "index" to n.commitIndex,
-                            "logs" to logs.joinToString { "[T${it.term}|${it.command.decodeToString()}]" })
+                            "logs" to logs.joinToString { "[T${it.term}|${it.entry.decodeToString()}]" })
                     )
-                    logs.map { it.command.decodeToString() } shouldBe expectedLogs
+                    logs.map { it.entry.decodeToString() } shouldBe expectedLogs
                 }
             }
         }
@@ -377,10 +375,10 @@ class RaftMachineTest : FunSpec({
                             entry(
                                 "check_entry",
                                 "term" to entry.term,
-                                "command" to entry.command.decodeToString()
+                                "command" to entry.entry.decodeToString()
                             )
                         )
-                        val message = entry.command.decodeToString()
+                        val message = entry.entry.decodeToString()
                         val (client, i) = messagePattern.matchEntire(message)!!
                             .destructured
                             .let { (c, i) -> c to i.toInt() }
