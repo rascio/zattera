@@ -22,8 +22,9 @@ class InMemoryRaftLog(
 ) : RaftLog {
 
     private val lock = ReadWriteLock()
+
     private val log: NavigableMap<Index, LogEntry> = TreeMap(log).apply {
-        put(0, LogEntry(0, ByteArray(0)))
+        put(0, LogEntry(0, LogEntry.ClientCommand(byteArrayOf())))
     }
     private val term = AtomicRef(term)
     private val votedFor = AtomicRef(votedFor)
@@ -36,8 +37,8 @@ class InMemoryRaftLog(
         return term.get()
     }
 
-    override suspend fun setTerm(index: Index) {
-        term.set(index)
+    override suspend fun setTerm(term: Index) {
+        this.term.set(term)
         votedFor.set(null)
     }
 
@@ -58,11 +59,12 @@ class InMemoryRaftLog(
             .toList()
     }
 
+
     override suspend fun append(previous: LogEntryMetadata, entries: List<LogEntry>): AppendResult = lock.withWriteLock {
-        val actual = log[previous.index]
+        val stored = log[previous.index]
         when {
-            actual == null -> AppendResult.IndexNotFound
-            actual.term != previous.term -> AppendResult.EntryMismatch
+            stored == null -> AppendResult.IndexNotFound
+            stored.term != previous.term -> AppendResult.EntryMismatch
             else -> {
                 entries.forEachIndexed { i, entry ->
                     log[previous.index + i + 1] = entry

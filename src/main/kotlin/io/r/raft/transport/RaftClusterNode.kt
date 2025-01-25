@@ -20,9 +20,8 @@ interface RaftClusterNode {
      */
     val peers: Set<NodeId>
     val input: ReceiveChannel<RaftMessage>
+
     suspend fun send(to: NodeId, rpc: RaftRpc)
-    //    val onReceive: SelectClause1<RaftMessage>
-//    val input: Flow<RaftMessage>
 
     companion object {
         val RaftClusterNode.quorum: Int

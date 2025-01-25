@@ -7,6 +7,7 @@ import io.kotest.matchers.comparables.shouldBeLessThan
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.shouldNotBe
 import io.kotest.matchers.types.shouldBeInstanceOf
+import io.r.raft.protocol.LogEntry
 import io.r.raft.protocol.LogEntryMetadata
 import io.r.raft.protocol.RaftMessage
 import io.r.raft.protocol.RaftRole
@@ -18,6 +19,7 @@ import io.r.raft.test.installCoroutine
 import io.r.raft.transport.RaftClusterNode
 import io.r.utils.awaitility.atMost
 import io.r.utils.awaitility.until
+import io.r.utils.decodeToString
 import io.r.utils.logs.entry
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers

@@ -22,7 +22,7 @@ interface RaftLog {
      * Set the current term
      * Reset the voted for node.
      */
-    suspend fun setTerm(index: Index)
+    suspend fun setTerm(term: Term)
 
     /**
      * Get the term at a specific index
@@ -43,12 +43,12 @@ interface RaftLog {
      * When `previous + entries.size < getLastIndex()`, the entries set after this batch will be removed.
      * @param previous the index of the last entry in the list
      * @param entries the entries to append
-     * @return the index of the last entry in the log
+     * @return [AppendResult] indicating the result of the operation
      */
     suspend fun append(previous: LogEntryMetadata, entries: List<LogEntry>): AppendResult
 
     /**
-     * Append a single entry to the log
+     * Set the node that was voted for
      */
     suspend fun setVotedFor(nodeId: NodeId)
 

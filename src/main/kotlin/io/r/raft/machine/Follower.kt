@@ -38,9 +38,8 @@ class Follower(
             )
         }
         is RaftRpc.AppendEntries -> {
-            @Suppress("IMPLICIT_CAST_TO_ANY")
             val result = when {
-                message.rpc.term < log.getTerm() -> "Leader is behind"
+                message.rpc.term < log.getTerm() -> null
                 else -> log.append(message.rpc.prevLog, message.rpc.entries)
             }
             val rcp = when (result) {
@@ -54,7 +53,13 @@ class Follower(
                     )
                 }
                 else -> {
-                    logger.warn(entry("Rejected_Append", "reason" to result, "prev" to "I${message.rpc.prevLog.index},T${message.rpc.prevLog.term}"))
+                    logger.warn {
+                        entry(
+                            "Rejected_Append",
+                            "reason" to (result ?: "Leader is behind"),
+                            "prev" to "I${message.rpc.prevLog.index},T${message.rpc.prevLog.term}"
+                        )
+                    }
                     RaftRpc.AppendEntriesResponse(
                         term = log.getTerm(),
                         matchIndex = message.rpc.prevLog.index,

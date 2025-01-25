@@ -9,6 +9,7 @@ import io.r.raft.protocol.LogEntryMetadata
 import io.r.raft.protocol.NodeId
 import io.r.raft.protocol.RaftRole
 import io.r.raft.transport.RaftClusterNode
+import io.r.utils.decodeToString
 import io.r.utils.logs.entry
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers

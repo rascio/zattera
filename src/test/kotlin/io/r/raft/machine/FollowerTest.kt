@@ -13,7 +13,6 @@ import io.r.raft.test.RaftLogBuilderScope.Companion.raftLog
 import io.r.raft.test.installChannel
 import io.r.raft.test.shouldReceive
 import io.r.raft.transport.inmemory.InMemoryRaftClusterNode
-import kotlinx.coroutines.channels.Channel
 import kotlin.time.Duration.Companion.seconds
 
 class FollowerTest : FunSpec({

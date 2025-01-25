@@ -13,7 +13,7 @@ class RaftLogBuilderScope {
     private val log = TreeMap<Index, LogEntry>()
 
     operator fun String.unaryPlus() {
-        log[log.size + 1L] = LogEntry(term, this.encodeToByteArray())
+        log[log.size + 1L] = LogEntry(term, LogEntry.ClientCommand(this.encodeToByteArray()))
     }
 
     operator fun LogEntry.unaryPlus() {

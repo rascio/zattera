@@ -19,6 +19,7 @@ import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.isActive
@@ -55,7 +56,7 @@ class RaftMachine(
     private val waitingForCommit = ConcurrentHashMap<String, CompletableDeferred<Any>>()
 
     val commitIndex get() = _role.value.serverState.commitIndex
-    val role
+    val role: Flow<RaftRole>
         get() = _role.map {
             when (it) {
                 is Follower -> RaftRole.FOLLOWER
@@ -124,7 +125,7 @@ class RaftMachine(
         when (_role.value) {
             is Leader -> {
                 val term = log.getTerm()
-                val entry = LogEntry(term = term, entry = command.entry, id = command.id)
+                val entry = LogEntry(term = term, entry = LogEntry.ClientCommand(command.entry), id = command.id)
                 log.append(log.getLastMetadata(), listOf(entry))
                 waitingForCommit[command.id] = command.response
 
@@ -153,7 +154,6 @@ class RaftMachine(
                 length = (serverState.commitIndex - lastApplied).toInt()
             )
             entries.forEach {
-
                 logger.debug(
                     entry(
                         "Applying_Committed",

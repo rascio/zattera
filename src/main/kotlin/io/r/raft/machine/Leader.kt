@@ -184,8 +184,7 @@ class Leader(
             RaftRpc.AppendEntries(
                 term = log.getTerm(),
                 leaderId = clusterNode.id,
-                prevLog = log.getMetadata(nextIndex - 1)
-                    ?: LogEntryMetadata.ZERO,
+                prevLog = log.getMetadata(nextIndex - 1) ?: LogEntryMetadata.ZERO,
                 entries = entries,
                 leaderCommit = serverState.commitIndex
             )
