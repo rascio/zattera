@@ -8,7 +8,8 @@ import io.r.raft.protocol.LogEntry
 import io.r.raft.protocol.LogEntryMetadata
 import io.r.raft.protocol.NodeId
 import io.r.raft.protocol.RaftRole
-import io.r.raft.transport.RaftClusterNode
+import io.r.raft.transport.RaftCluster
+import io.r.raft.transport.inmemory.RaftClusterInMemoryNetwork
 import io.r.utils.decodeToString
 import io.r.utils.logs.entry
 import kotlinx.coroutines.CoroutineScope
@@ -36,7 +37,7 @@ suspend fun ResourceScope.installRaftTestNode(
 )
 class RaftTestNode private constructor(
     private val raftClusterInMemoryNetwork: RaftClusterInMemoryNetwork,
-    private val raftClusterNode: RaftClusterNode,
+    private val raftCluster: RaftCluster,
     val configuration: RaftMachine.Configuration,
     private var _log: RaftLog,
     private val scope: CoroutineScope
@@ -50,7 +51,7 @@ class RaftTestNode private constructor(
             scope: CoroutineScope? = null
         ) = RaftTestNode(
             raftClusterInMemoryNetwork = raftClusterInMemoryNetwork,
-            raftClusterNode = raftClusterInMemoryNetwork.createNode(nodeId),
+            raftCluster = raftClusterInMemoryNetwork.createNode(nodeId),
             configuration = configuration,
             _log = InMemoryRaftLog(),
             scope = scope ?: CoroutineScope(Dispatchers.IO)
@@ -63,7 +64,7 @@ class RaftTestNode private constructor(
     val commitIndex get() = _raftMachine.get().commitIndex
     val raftMachine: RaftMachine get() = _raftMachine.get()
     val log get() = _log
-    val id: NodeId = raftClusterNode.id
+    val id: NodeId = raftCluster.id
     val roleChanges get() = raftMachine.role
 
     var stateMachineApplyDelayMs = 0L
@@ -94,7 +95,7 @@ class RaftTestNode private constructor(
     private fun newRaftMachine() = RaftMachine(
         configuration = configuration,
         log = _log,
-        cluster = raftClusterNode,
+        cluster = raftCluster,
         stateMachine = object : StateMachine {
             var applied = 0L
             override suspend fun apply(command: LogEntry) {

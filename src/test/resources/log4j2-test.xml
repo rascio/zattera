@@ -4,13 +4,14 @@
                xsi:schemaLocation="https://logging.apache.org/xml/ns https://logging.apache.org/xml/ns/log4j-config-2.23.1.xsd">
     <Appenders>
         <Console name="Console" target="SYSTEM_OUT">
-            <PatternLayout pattern="%d{yyyy-MM-dd HH:mm:ss.SSS} | %highlight{%-5p} | [%10.10t] | %c{1} | %m%n"/>
-        </Console>
+            <PatternLayout pattern="%d{yyyy-MM-dd HH:mm:ss.SSS} | %highlight{%-5p} | [%10.15t] | %c{1} | %m%n"/>
+        </Console><Async name="AsyncConsole">
+        <AppenderRef ref="Console"/>
+    </Async>
     </Appenders>
     <Loggers>
-
         <Root level="DEBUG">
-            <AppenderRef ref="Console"/>
+            <AppenderRef ref="AsyncConsole"/>
         </Root>
     </Loggers>
 </Configuration>

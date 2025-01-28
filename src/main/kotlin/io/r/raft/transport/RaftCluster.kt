@@ -9,7 +9,7 @@ import kotlinx.coroutines.channels.ReceiveChannel
  * Represents a node in the Raft cluster.
  * Offers a way to send messages to other nodes in the cluster and receive messages from them.
  */
-interface RaftClusterNode {
+interface RaftCluster {
     /**
      * The unique identifier of the node.
      */
@@ -22,9 +22,10 @@ interface RaftClusterNode {
     val input: ReceiveChannel<RaftMessage>
 
     suspend fun send(to: NodeId, rpc: RaftRpc)
+    fun addPeer(node: RaftRpc.ClusterNode)
 
     companion object {
-        val RaftClusterNode.quorum: Int
+        val RaftCluster.quorum: Int
             get() = peers.size / 2 + 1
     }
 }

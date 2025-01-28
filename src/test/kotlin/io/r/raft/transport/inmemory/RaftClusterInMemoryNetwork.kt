@@ -1,12 +1,11 @@
-package io.r.raft.machine
+package io.r.raft.transport.inmemory
 
 import arrow.fx.coroutines.ResourceScope
 import arrow.fx.coroutines.autoCloseable
 import io.r.raft.protocol.NodeId
 import io.r.raft.protocol.RaftMessage
 import io.r.raft.protocol.RaftRpc
-import io.r.raft.transport.RaftClusterNode
-import io.r.raft.transport.inmemory.InMemoryRaftClusterNode
+import io.r.raft.transport.RaftCluster
 import io.r.raft.transport.utils.LoggingRaftClusterNode
 import io.r.utils.logs.entry
 import kotlinx.coroutines.channels.Channel
@@ -18,18 +17,30 @@ suspend fun ResourceScope.installRaftClusterNetwork(vararg nodeIds: NodeId) =
 
 class RaftClusterInMemoryNetwork(private val scope: ResourceScope, vararg nodeIds: NodeId) : AutoCloseable {
     private val isolatedNodes = mutableSetOf<NodeId>()
-    private val nodes = mutableMapOf<NodeId, Channel<RaftMessage>>().apply {
+    private val _nodes = mutableMapOf<NodeId, Channel<RaftMessage>>().apply {
         nodeIds.forEach { id -> put(id, Channel(Channel.UNLIMITED)) }
     }
+    val nodes get() = _nodes.keys
 
-    suspend fun createNode(name: NodeId, logging: Boolean = true): RaftClusterNode {
-        nodes.computeIfAbsent(name) { Channel(Channel.UNLIMITED) }
-        var clusterNode: RaftClusterNode = InMemoryRaftClusterNode(name, nodes)
+    fun createPeer(nodeId: NodeId): Channel<RaftMessage> {
+        return _nodes.computeIfAbsent(nodeId) { Channel(Channel.UNLIMITED) }
+    }
+
+    suspend fun send(message: RaftMessage) {
+        val node = requireNotNull(_nodes[message.to]) {
+            "Node ${message.to} not found"
+        }
+        node.send(message)
+    }
+
+    suspend fun createNode(name: NodeId, logging: Boolean = true): RaftCluster {
+        createPeer(name)
+        var clusterNode: RaftCluster = InMemoryRaftClusterNode(name, this)
 
         if (logging) {
             clusterNode = scope.autoCloseable { LoggingRaftClusterNode(clusterNode) }
         }
-        return object : RaftClusterNode by clusterNode {
+        return object : RaftCluster by clusterNode {
             override suspend fun send(to: NodeId, rpc: RaftRpc) {
                 when {
                     to in isolatedNodes -> {
@@ -59,7 +70,7 @@ class RaftClusterInMemoryNetwork(private val scope: ResourceScope, vararg nodeId
     }
 
     override fun close() {
-        nodes.values.forEach { it.close() }
+        _nodes.values.forEach { it.close() }
     }
 
     companion object {

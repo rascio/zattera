@@ -2,17 +2,17 @@ package io.r.raft.machine
 
 import arrow.fx.coroutines.resourceScope
 import io.kotest.core.spec.style.FunSpec
+import io.r.raft.log.RaftLog.Companion.getLastMetadata
 import io.r.raft.protocol.LogEntryMetadata
 import io.r.raft.protocol.RaftMessage
+import io.r.raft.protocol.RaftRole
 import io.r.raft.protocol.RaftRpc
 import io.r.raft.protocol.RaftRpc.AppendEntries
 import io.r.raft.protocol.RaftRpc.AppendEntriesResponse
-import io.r.raft.protocol.RaftRole
-import io.r.raft.log.RaftLog.Companion.getLastMetadata
 import io.r.raft.test.RaftLogBuilderScope.Companion.raftLog
-import io.r.raft.test.installChannel
 import io.r.raft.test.shouldReceive
 import io.r.raft.transport.inmemory.InMemoryRaftClusterNode
+import io.r.raft.transport.inmemory.installRaftClusterNetwork
 import kotlin.time.Duration.Companion.seconds
 
 class FollowerTest : FunSpec({
@@ -21,9 +21,10 @@ class FollowerTest : FunSpec({
 
     context("A node in Follower state") {
         resourceScope {
-            val N1 = installChannel<RaftMessage>()
-            val N2 = installChannel<RaftMessage>()
-            val clusterNode = InMemoryRaftClusterNode("UnderTest", mapOf("N1" to N1, "N2" to N2))
+            val network = installRaftClusterNetwork()
+            val N1 = network.createPeer("N1")
+            val N2 = network.createPeer("N2")
+            val clusterNode = InMemoryRaftClusterNode("UnderTest", network)
             val log = raftLog {
                 term = 0L
                 +"Hello World"
@@ -33,7 +34,7 @@ class FollowerTest : FunSpec({
             val underTest = Follower(
                 serverState = ServerState(0L, 0L),
                 log = log,
-                clusterNode = clusterNode,
+                cluster = clusterNode,
                 changeRole = changeRoleFn,
                 configuration = RaftMachine.Configuration(
                     leaderElectionTimeoutMs = 1000

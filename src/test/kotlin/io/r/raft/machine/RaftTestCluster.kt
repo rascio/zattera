@@ -2,6 +2,7 @@ package io.r.raft.machine
 
 import arrow.fx.coroutines.ResourceScope
 import io.r.raft.protocol.NodeId
+import io.r.raft.transport.inmemory.RaftClusterInMemoryNetwork
 import io.r.utils.awaitility.untilNotNull
 import io.r.utils.awaitility.atMost
 import io.r.utils.logs.entry
@@ -22,7 +23,7 @@ class RaftTestCluster(val nodes: List<RaftTestNode>) {
 
     suspend fun append(vararg commands: String) = append(commands.toList())
     suspend fun append(commands: List<String>): Unit = coroutineScope {
-        awaitLeaderElected()
+        awaitFindLeader()
             .let { leader ->
                 try {
                     withTimeoutOrNull(1000) {
@@ -61,15 +62,15 @@ class RaftTestCluster(val nodes: List<RaftTestNode>) {
     /**
      * Wait until a leader is elected
      */
-    fun awaitLeaderElected(timeout: Duration = 3.seconds): RaftTestNode {
-        logger.info("waiting_for_leader_election")
-        val leader = "await_leader_election" atMost timeout untilNotNull {
+    fun awaitFindLeader(timeout: Duration = 3.seconds): RaftTestNode {
+        logger.info("await_find_leader")
+        val leader = "await_find_leader" atMost timeout untilNotNull {
             nodes.filter { it.isLeader() }
                 .toSet()
                 .takeIf { it.size == 1 }
                 ?.first()
         }
-        logger.info(entry("Leader_elected", "leader" to leader.id))
+        logger.info(entry("Leader_found", "leader" to leader.id))
         return leader
     }
 

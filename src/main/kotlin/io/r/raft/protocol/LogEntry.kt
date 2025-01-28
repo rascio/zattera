@@ -17,9 +17,8 @@ data class LogEntry(
     @Serializable
     class ClientCommand(val bytes: ByteArray) : Entry
     @Serializable
-    data class ConfigurationChange(val new: List<ClusterNode>, val old: List<ClusterNode>? = null) : Entry {
-        @Serializable
-        data class ClusterNode(val id: NodeId, val host: String, val port: Int)
+    data class ConfigurationChange(val new: List<RaftRpc.ClusterNode>, val old: List<RaftRpc.ClusterNode>? = null) : Entry {
+
     }
 
 }

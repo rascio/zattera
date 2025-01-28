@@ -5,21 +5,21 @@ import arrow.fx.coroutines.resourceScope
 import io.kotest.common.ExperimentalKotest
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.matchers.shouldBe
+import io.r.raft.log.RaftLog.Companion.getLastMetadata
+import io.r.raft.log.inmemory.InMemoryRaftLog
 import io.r.raft.protocol.LogEntryMetadata
 import io.r.raft.protocol.NodeId
 import io.r.raft.protocol.RaftMessage
 import io.r.raft.protocol.RaftRpc
-import io.r.raft.log.RaftLog.Companion.getLastMetadata
-import io.r.raft.log.inmemory.InMemoryRaftLog
 import io.r.raft.test.RaftLogBuilderScope.Companion.raftLog
 import io.r.raft.test.failOnTimeout
-import io.r.raft.test.installChannel
 import io.r.raft.test.installCoroutine
 import io.r.raft.test.shouldReceive
 import io.r.raft.transport.inmemory.InMemoryRaftClusterNode
+import io.r.raft.transport.inmemory.RaftClusterInMemoryNetwork
+import io.r.raft.transport.inmemory.installRaftClusterNetwork
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.channels.ChannelResult
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withTimeout
@@ -39,8 +39,9 @@ class LeaderTest : FunSpec({
     context("A node in Leader state") {
         context("Upon election").config(timeout = 10.seconds) {
             resourceScope {
-                val N1 = installChannel<RaftMessage>()
-                val N2 = installChannel<RaftMessage>()
+                val network = installRaftClusterNetwork()
+                val N1 = network.createPeer("N1")
+                val N2 = network.createPeer("N2")
                 val (changeRoleFn) = mockRoleTransition()
                 val log = raftLog {
                     term = 2
@@ -50,7 +51,7 @@ class LeaderTest : FunSpec({
                     log = log,
                     changeRoleFn = changeRoleFn,
                     scope = installCoroutine(Dispatchers.IO),
-                    peers = mapOf("N1" to N1, "N2" to N2)
+                    network = network
                 )
                 leader.onEnter()
                 test("send initial empty AppendEntries RPCs (heartbeat) to each server").config(timeout = 1.seconds) {
@@ -77,36 +78,40 @@ class LeaderTest : FunSpec({
                         )
                     )
                 }
-                test("repeat (heartbeat) during idle periods to prevent election timeouts").config(timeout = 1.seconds) {
-                    N1 shouldReceive RaftMessage(
-                        from = "UnderTest",
-                        to = "N1",
-                        rpc = RaftRpc.AppendEntries(
-                            term = 2,
-                            leaderId = "UnderTest",
-                            prevLog = log.getLastMetadata(),
-                            entries = emptyList(),
-                            leaderCommit = log.getLastIndex()
+                test("repeat (heartbeat) during idle periods to prevent election timeouts").config(timeout = 3.seconds) {
+                    logger.info("repeat (heartbeat) during idle periods to prevent election timeouts")
+                    repeat(2) {
+                        N1 shouldReceive RaftMessage(
+                            from = "UnderTest",
+                            to = "N1",
+                            rpc = RaftRpc.AppendEntries(
+                                term = 2,
+                                leaderId = "UnderTest",
+                                prevLog = log.getLastMetadata(),
+                                entries = emptyList(),
+                                leaderCommit = log.getLastIndex()
+                            )
                         )
-                    )
-                    N2 shouldReceive RaftMessage(
-                        from = "UnderTest",
-                        to = "N2",
-                        rpc = RaftRpc.AppendEntries(
-                            term = 2,
-                            leaderId = "UnderTest",
-                            prevLog = log.getLastMetadata(),
-                            entries = emptyList(),
-                            leaderCommit = log.getLastIndex()
+                        N2 shouldReceive RaftMessage(
+                            from = "UnderTest",
+                            to = "N2",
+                            rpc = RaftRpc.AppendEntries(
+                                term = 2,
+                                leaderId = "UnderTest",
+                                prevLog = log.getLastMetadata(),
+                                entries = emptyList(),
+                                leaderCommit = log.getLastIndex()
+                            )
                         )
-                    )
+                    }
                 }
             }
         }
         context("If last log index ≥ nextIndex for a follower: send AppendEntries RPC with log entries starting at nextIndex") scope@{
             test("If AppendEntries fails because of log inconsistency: decrement nextIndex and retry").config(timeout = 1.seconds) {
                 resourceScope {
-                    val N1 = installChannel<RaftMessage>()
+                    val network = installRaftClusterNetwork()
+                    val N1 = network.createPeer("N1")
                     val (changeRoleFn) = mockRoleTransition()
                     val log = raftLog {
                         term = 2
@@ -120,7 +125,7 @@ class LeaderTest : FunSpec({
                         log = log,
                         changeRoleFn = changeRoleFn,
                         scope = installCoroutine(Dispatchers.IO),
-                        peers = mapOf("N1" to N1),
+                        network = network,
                         peersState = peersState
                     )
                     // responding to the initial AppendEntries appending log at index 2, prevLog = 1
@@ -155,7 +160,8 @@ class LeaderTest : FunSpec({
             }
             test("If successful: update nextIndex and matchIndex for follower").config(timeout = 1.seconds) {
                 resourceScope {
-                    val N1 = installChannel<RaftMessage>()
+                    val network = installRaftClusterNetwork()
+                    val N1 = network.createPeer("N1")
                     val (changeRoleFn) = mockRoleTransition()
                     val log = raftLog {
                         term = 2
@@ -169,7 +175,7 @@ class LeaderTest : FunSpec({
                         log = log,
                         changeRoleFn = changeRoleFn,
                         scope = installCoroutine(Dispatchers.IO),
-                        peers = mapOf("N1" to N1),
+                        network = network,
                         peersState = peersState
                     )
                     // responding to the initial AppendEntries appending log at index 2, prevLog = 1
@@ -225,11 +231,14 @@ class LeaderTest : FunSpec({
                         +"Command-$it"
                     }
                 }
+                val network = installRaftClusterNetwork().apply {
+                    peersState.keys.forEach { createPeer(it) }
+                }
                 val leader = installLeader(
                     log = log,
                     changeRoleFn = changeRoleFn,
                     scope = installCoroutine(Dispatchers.IO),
-                    peers = peersState.mapValues { installChannel() },
+                    network = network,
                     peersState = peersState,
                     serverState = ServerState(commitIndex, 2L)
                 )
@@ -255,7 +264,8 @@ class LeaderTest : FunSpec({
         val heartbeatTimeoutMs: Long = 500
         test("Should stop the heartbeat on exit").config(timeout = (heartbeatTimeoutMs * 5).milliseconds) {
             resourceScope {
-                val N1 = installChannel<RaftMessage>()
+                val network = installRaftClusterNetwork()
+                val N1 = network.createPeer("N1")
                 val log = raftLog {
                     term = 5
                     +"First Command"
@@ -267,7 +277,7 @@ class LeaderTest : FunSpec({
                     log = log,
                     changeRoleFn = changeRoleFn,
                     scope = scope,
-                    peers = mapOf("N1" to N1),
+                    network = network,
                     heartbeatTimeoutMs = heartbeatTimeoutMs
                 )
                 leader.onEnter()
@@ -286,7 +296,8 @@ class LeaderTest : FunSpec({
         }
         test("Should ignore a rejected AppendEntriesResponse when it is not matching matchIndex") {
             resourceScope {
-                val N1 = installChannel<RaftMessage>()
+                val network = installRaftClusterNetwork()
+                val N1 = network.createPeer("N1")
                 val log = raftLog {
                     term = 5
                     +"First Command"
@@ -297,7 +308,7 @@ class LeaderTest : FunSpec({
                     log = log,
                     changeRoleFn = changeRoleFn,
                     scope = installCoroutine(Dispatchers.IO),
-                    peers = mapOf("N1" to N1)
+                    network = network,
                 )
                 logger.info("Starting test")
                 leader.onEnter()
@@ -336,7 +347,8 @@ class LeaderTest : FunSpec({
         }
         test("A crashed follower restart and starts to sync").config(timeout = 3.seconds) {
             resourceScope {
-                val N1 = installChannel<RaftMessage>()
+                val network = installRaftClusterNetwork()
+                val N1 = network.createPeer("N1")
                 val (changeRoleFn) = mockRoleTransition()
                 val log = raftLog {
                     term = 12
@@ -358,7 +370,7 @@ class LeaderTest : FunSpec({
                     log = log,
                     changeRoleFn = changeRoleFn,
                     scope = installCoroutine(Dispatchers.IO),
-                    peers = mapOf("N1" to N1),
+                    network = network,
                     peersState = peersState,
                     serverState = ServerState(5, 5)
                 )
@@ -404,7 +416,7 @@ class LeaderTest : FunSpec({
             log: InMemoryRaftLog,
             changeRoleFn: RoleTransition,
             scope: CoroutineScope,
-            peers: Map<NodeId, Channel<RaftMessage>>,
+            network: RaftClusterInMemoryNetwork,
             peersState: MutableMap<NodeId, PeerState> = mutableMapOf(),
             heartbeatTimeoutMs: Long = 700,
             serverState: ServerState? = null
@@ -413,7 +425,7 @@ class LeaderTest : FunSpec({
                 Leader(
                     serverState = serverState ?: ServerState(commitIndex = log.getLastIndex(), lastApplied = 0),
                     log = log,
-                    clusterNode = InMemoryRaftClusterNode("UnderTest", peers),
+                    cluster = InMemoryRaftClusterNode("UnderTest", network),
                     changeRole = changeRoleFn,
                     scope = scope,
                     configuration = RaftMachine.Configuration(

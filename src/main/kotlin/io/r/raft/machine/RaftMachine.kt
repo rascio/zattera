@@ -5,10 +5,11 @@ import io.r.raft.log.RaftLog.Companion.getLastMetadata
 import io.r.raft.log.StateMachine
 import io.r.raft.protocol.LogEntry
 import io.r.raft.protocol.RaftRole
-import io.r.raft.transport.RaftClusterNode
+import io.r.raft.transport.RaftCluster
 import io.r.utils.encodeBase64
 import io.r.utils.logs.entry
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineName
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Dispatchers
@@ -33,13 +34,13 @@ import java.util.concurrent.ConcurrentHashMap
 
 class RaftMachine(
     private val configuration: Configuration,
-    private val cluster: RaftClusterNode,
+    private val cluster: RaftCluster,
     private val log: RaftLog,
     private val stateMachine: StateMachine,
     private val scope: CoroutineScope = CoroutineScope(Dispatchers.IO)
 ) {
 
-    private class IncomingRequest(
+    class IncomingRequest(
         val entry: ByteArray,
         val response: CompletableDeferred<Any>,
         val id: String = UUID.randomUUID().toString()
@@ -55,6 +56,7 @@ class RaftMachine(
     )
     private val waitingForCommit = ConcurrentHashMap<String, CompletableDeferred<Any>>()
 
+    val serverState get() = _role.value.serverState
     val commitIndex get() = _role.value.serverState.commitIndex
     val role: Flow<RaftRole>
         get() = _role.map {
@@ -68,7 +70,7 @@ class RaftMachine(
     @OptIn(ExperimentalCoroutinesApi::class)
     fun start() {
         logger.info(entry("Starting_RaftMachine", "job" to job))
-        job = scope.launch {
+        job = scope.launch(CoroutineName(cluster.id)) {
             changeRole(RaftRole.FOLLOWER)
             try {
                 while (isActive) {
@@ -87,7 +89,7 @@ class RaftMachine(
                             _role.value.onTimeout()
                         }
                         incomingRequests.onReceive { command ->
-                            dequeueRequest(command)
+                            appendRequest(command)
                         }
                     }
                 }
@@ -111,25 +113,28 @@ class RaftMachine(
     suspend fun command(command: ByteArray): Deferred<Any> {
         val entry = IncomingRequest(command, CompletableDeferred())
         incomingRequests.send(entry)
-        logger.info(
+        logger.info {
             entry(
                 "command_sent",
                 "id" to entry.id,
                 "command" to command.encodeBase64()
             )
-        )
+        }
         return entry.response
     }
 
-    private suspend fun dequeueRequest(command: IncomingRequest) {
+    private suspend fun appendRequest(command: IncomingRequest) {
         when (_role.value) {
             is Leader -> {
                 val term = log.getTerm()
                 val entry = LogEntry(term = term, entry = LogEntry.ClientCommand(command.entry), id = command.id)
                 log.append(log.getLastMetadata(), listOf(entry))
+
+                // add to waiting queue
                 waitingForCommit[command.id] = command.response
 
                 scope.launch {
+                    // on timeout, remove and cancel from waiting queue
                     delay(configuration.pendingCommandsTimeout)
                     waitingForCommit.remove(entry.id)
                         ?.cancel("Time out")
@@ -154,17 +159,17 @@ class RaftMachine(
                 length = (serverState.commitIndex - lastApplied).toInt()
             )
             entries.forEach {
-                logger.debug(
+                logger.debug {
                     entry(
                         "Applying_Committed",
                         "entry" to it.id,
-                        "index" to serverState.lastApplied + 1,
+                        "index" to lastApplied + 1,
                         "client_handle" to waitingForCommit.contains(it.id)
                     )
-                )
+                }
                 val result = stateMachine.apply(it)
-                releaseCommit(it, result)
                 serverState.lastApplied++
+                releaseCommit(it, result)
             }
         }
     }
@@ -172,7 +177,7 @@ class RaftMachine(
     suspend fun stop() {
         incomingRequests.cancel()
         waitingForCommit.forEach {
-            it.value.cancel()
+            it.value.cancel("Stopping RaftMachine")
         }
         waitingForCommit.clear()
         job?.run {

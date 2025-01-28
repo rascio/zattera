@@ -6,8 +6,8 @@ import io.r.raft.protocol.RaftRpc
 import io.r.raft.protocol.RaftRole
 import io.r.raft.log.RaftLog
 import io.r.raft.log.RaftLog.Companion.getLastMetadata
-import io.r.raft.transport.RaftClusterNode
-import io.r.raft.transport.RaftClusterNode.Companion.quorum
+import io.r.raft.transport.RaftCluster
+import io.r.raft.transport.RaftCluster.Companion.quorum
 import io.r.utils.logs.entry
 import org.apache.logging.log4j.LogManager
 import org.apache.logging.log4j.Logger
@@ -18,7 +18,7 @@ class Candidate(
     override val serverState: ServerState,
     val configuration: RaftMachine.Configuration,
     override val log: RaftLog,
-    override val clusterNode: RaftClusterNode,
+    override val cluster: RaftCluster,
     override val changeRole: suspend (RaftRole) -> Role
 ) : Role() {
 
@@ -29,14 +29,14 @@ class Candidate(
     override suspend fun onEnter() {
         val nextTerm = log.getTerm() + 1
         log.setTerm(nextTerm)
-        votesReceived += clusterNode.id
+        votesReceived += cluster.id
         logger.debug(entry("Starting_Election", "term" to nextTerm))
-        clusterNode.peers.forEach { peer ->
-            clusterNode.send(
+        cluster.peers.forEach { peer ->
+            cluster.send(
                 to = peer,
                 rpc = RaftRpc.RequestVote(
                     log.getTerm(),
-                    clusterNode.id,
+                    cluster.id,
                     log.getLastMetadata()
                 )
             )
@@ -49,8 +49,8 @@ class Candidate(
             is RaftRpc.RequestVoteResponse -> {
                 if (message.rpc.voteGranted) {
                     votesReceived += message.from
-                    logger.debug(entry("Received_Vote", "from" to message.from, "votes" to votesReceived.size, "quorum" to floor(clusterNode.peers.size / 2.0)))
-                    if (votesReceived.size >= clusterNode.quorum) {
+                    logger.debug(entry("Received_Vote", "from" to message.from, "votes" to votesReceived.size, "quorum" to floor(cluster.peers.size / 2.0)))
+                    if (votesReceived.size >= cluster.quorum) {
                         changeRole(RaftRole.LEADER)
                     }
                 }
@@ -60,7 +60,7 @@ class Candidate(
                     .onReceivedMessage(message)
             }
             is RaftRpc.RequestVote -> {
-                clusterNode.send(
+                cluster.send(
                     message.from,
                     RaftRpc.RequestVoteResponse(
                         term = log.getTerm(),

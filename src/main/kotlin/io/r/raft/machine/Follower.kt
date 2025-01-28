@@ -3,11 +3,10 @@ package io.r.raft.machine
 import io.r.raft.log.RaftLog
 import io.r.raft.log.RaftLog.Companion.AppendResult
 import io.r.raft.log.RaftLog.Companion.getLastMetadata
-import io.r.raft.protocol.Index
 import io.r.raft.protocol.RaftMessage
 import io.r.raft.protocol.RaftRole
 import io.r.raft.protocol.RaftRpc
-import io.r.raft.transport.RaftClusterNode
+import io.r.raft.transport.RaftCluster
 import io.r.utils.logs.entry
 import org.apache.logging.log4j.LogManager
 import org.apache.logging.log4j.Logger
@@ -17,7 +16,7 @@ class Follower(
     override val serverState: ServerState,
     val configuration: RaftMachine.Configuration,
     override val log: RaftLog,
-    override val clusterNode: RaftClusterNode,
+    override val cluster: RaftCluster,
     override val changeRole: RoleTransition
 ) : Role() {
 
@@ -29,7 +28,7 @@ class Follower(
                 && log.getVotedFor().let { it == null || it == message.from }
                 && message.rpc.lastLog >= log.getLastMetadata()
             log.setVotedFor(message.from)
-            clusterNode.send(
+            cluster.send(
                 to = message.from,
                 rpc = RaftRpc.RequestVoteResponse(
                     log.getTerm(),
@@ -40,7 +39,10 @@ class Follower(
         is RaftRpc.AppendEntries -> {
             val result = when {
                 message.rpc.term < log.getTerm() -> null
-                else -> log.append(message.rpc.prevLog, message.rpc.entries)
+                else -> {
+                    serverState.leader = message.from
+                    log.append(message.rpc.prevLog, message.rpc.entries)
+                }
             }
             val rcp = when (result) {
                 is AppendResult.Appended -> {
@@ -68,7 +70,7 @@ class Follower(
                     )
                 }
             }
-            clusterNode.send(to = message.from, rpc = rcp)
+            cluster.send(to = message.from, rpc = rcp)
         }
         else -> {
             logger.debug(entry("Ignoring_Message", "message" to message.rpc, "from" to message.from))

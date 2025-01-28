@@ -7,7 +7,6 @@ import io.kotest.matchers.comparables.shouldBeLessThan
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.shouldNotBe
 import io.kotest.matchers.types.shouldBeInstanceOf
-import io.r.raft.protocol.LogEntry
 import io.r.raft.protocol.LogEntryMetadata
 import io.r.raft.protocol.RaftMessage
 import io.r.raft.protocol.RaftRole
@@ -16,11 +15,13 @@ import io.r.raft.protocol.RaftRpc.AppendEntries
 import io.r.raft.protocol.RaftRpc.AppendEntriesResponse
 import io.r.raft.test.failOnTimeout
 import io.r.raft.test.installCoroutine
-import io.r.raft.transport.RaftClusterNode
+import io.r.raft.transport.RaftCluster
+import io.r.raft.transport.inmemory.installRaftClusterNetwork
 import io.r.utils.awaitility.atMost
 import io.r.utils.awaitility.until
 import io.r.utils.decodeToString
 import io.r.utils.logs.entry
+import kotlinx.coroutines.CoroutineName
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.coroutineScope
@@ -58,7 +59,13 @@ class RaftMachineTest : FunSpec({
                     val N1 = network.createNode("N1")
                     val N2 = network.createNode("N2")
 
-                    val underTest = installRaftTestNode("UnderTest", network)
+                    val underTest = installRaftTestNode(
+                        nodeId = "UnderTest",
+                        cluster = network,
+                        configuration = RaftMachine.Configuration(
+                            leaderElectionTimeoutJitterMs = 100
+                        )
+                    )
 
                     val n1Voted = launch {
                         // Elect underTest as leader
@@ -108,6 +115,7 @@ class RaftMachineTest : FunSpec({
             }
             test("Should step down when receiving an AppendEntries with a higher term") {
                 resourceScope {
+                    logger.info("Should step down when receiving an AppendEntries with a higher term")
                     val network = installRaftClusterNetwork()
                     val N1 = network.createNode("N1")
                     val N2 = network.createNode("N2")
@@ -178,7 +186,7 @@ class RaftMachineTest : FunSpec({
                         )
                     }
                 )
-                assertNotNull(cluster.awaitLeaderElected())
+                assertNotNull(cluster.awaitFindLeader())
             }
         }
         test("When the leader is disconnected, a new leader should be elected") {
@@ -196,7 +204,7 @@ class RaftMachineTest : FunSpec({
                         )
                     }
                 )
-                val initialLeader = cluster.awaitLeaderElected()
+                val initialLeader = cluster.awaitFindLeader()
                 val initialTerm = initialLeader.getCurrentTerm()
                 logger.info(entry("initial_leader", "term" to initialTerm, "id" to initialLeader.id))
 
@@ -232,7 +240,7 @@ class RaftMachineTest : FunSpec({
                         )
                     }
                 )
-                val leader = cluster.awaitLeaderElected()
+                val leader = cluster.awaitFindLeader()
                 failOnTimeout("timeout waiting for command to be processed", 400.milliseconds) {
                     leader.raftMachine.command("Hello World".encodeToByteArray())
                         .join()
@@ -262,7 +270,7 @@ class RaftMachineTest : FunSpec({
                     }
                 )
                 // Elect a leader
-                val leader = cluster.awaitLeaderElected()
+                val leader = cluster.awaitFindLeader()
                 val firstCmdIndex = leader.commitIndex + 1
 
                 // Append a command to the leader
@@ -333,7 +341,7 @@ class RaftMachineTest : FunSpec({
                 val cluster = installRaftTestCluster(
                     scope = scope,
                     network = clusterNetwork,
-                    nodeIds = refs,
+                    nodeIds = (1..5).map { "T$it" },
                     config = {
                         RaftMachine.Configuration(
                             maxLogEntriesPerAppend = 4,
@@ -342,7 +350,7 @@ class RaftMachineTest : FunSpec({
                         )
                     }
                 )
-
+                logger.info("----- started -----")
                 val messagePattern = Regex("([A-Z])-([0-9]+)")
                 // C clients sending B batches of M messages each
                 val C = 8
@@ -353,10 +361,10 @@ class RaftMachineTest : FunSpec({
                     val clientsSendingEntriesJob = launch {
                         startClientsSendingBatches(C, B, M, cluster)
                     }
-                    launch {
+                    launch(CoroutineName("Chaos")) {
                         // Randomly disconnect the leader
                         do {
-                            cluster.awaitLeaderElected(timeout = 5.seconds).apply {
+                            cluster.awaitFindLeader(timeout = 5.seconds).apply {
                                 disconnect()
                                 cluster.awaitDifferentLeaderElected(id, timeout = 5.seconds)
                                 delay(configuration.heartbeatTimeoutMs * Random.nextLong(3, 10))
@@ -411,7 +419,7 @@ private fun CoroutineScope.startClientsSendingBatches(
                     .map { it.encodeToByteArray() }
                     .toList()
                 @Suppress("DeferredResultUnused")
-                cluster.awaitLeaderElected(5.seconds).apply {
+                cluster.awaitFindLeader(5.seconds).apply {
                     raftMachine.command(batch)
                     delay(40)
                 }
@@ -422,12 +430,12 @@ private fun CoroutineScope.startClientsSendingBatches(
 
 
 /**
- * Make the [RaftTestNode] receive a message from the [RaftClusterNode]
+ * Make the [RaftTestNode] receive a message from the [RaftCluster]
  */
-suspend inline fun RaftClusterNode.sendTo(to: RaftTestNode, rpc: () -> RaftRpc) {
+suspend inline fun RaftCluster.sendTo(to: RaftTestNode, rpc: () -> RaftRpc) {
     send(to.id, rpc())
 }
 
-private suspend infix fun RaftClusterNode.shouldReceive(expected: RaftMessage) {
+private suspend infix fun RaftCluster.shouldReceive(expected: RaftMessage) {
     input.receive() shouldBe expected
 }

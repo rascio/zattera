@@ -21,9 +21,9 @@ import io.r.raft.log.StateMachine
 import io.r.raft.log.inmemory.InMemoryRaftLog
 import io.r.raft.machine.RaftMachine
 import io.r.raft.protocol.LogEntry
-import io.r.raft.transport.RaftClusterNode
-import io.r.raft.transport.ktor.KtorRestRaftClusterNode
-import io.r.raft.transport.ktor.KtorRestRaftClusterNode.RestNodeAddress
+import io.r.raft.transport.RaftCluster
+import io.r.raft.transport.ktor.KtorRestRaftCluster
+import io.r.raft.transport.ktor.KtorRestRaftCluster.RestNodeAddress
 import io.r.raft.transport.utils.LoggingRaftClusterNode
 import io.r.utils.logs.entry
 import kotlinx.coroutines.CoroutineName
@@ -93,10 +93,10 @@ class RestRaftServer : Callable<String> {
 
     private suspend fun ResourceScope.execute() = coroutineScope {
         val raftLog = InMemoryRaftLog()
-        val raftClusterNode = KtorRestRaftClusterNode(id, peers.map(RestNodeAddress::parse).toSet())
+        val raftClusterNode = KtorRestRaftCluster(id, peers.map(RestNodeAddress::parse).toSet())
 
         val raftMachine = installRaftMachine(
-            raftClusterNode = when {
+            raftCluster = when {
                 debugMessages -> autoCloseable { LoggingRaftClusterNode(raftClusterNode) }
                 else -> raftClusterNode
             },
@@ -113,7 +113,7 @@ class RestRaftServer : Callable<String> {
     }
 
     private suspend fun ResourceScope.installHttpServer(
-        raftClusterNode: KtorRestRaftClusterNode,
+        raftClusterNode: KtorRestRaftCluster,
         raftMachine: RaftMachine,
         raftLog: InMemoryRaftLog
     ) = install(
@@ -129,7 +129,7 @@ class RestRaftServer : Callable<String> {
     )
 
     private fun Application.installRoutes(
-        raftClusterNode: KtorRestRaftClusterNode,
+        raftClusterNode: KtorRestRaftCluster,
         raft: RaftMachine,
         raftLog: InMemoryRaftLog
     ) {
@@ -159,7 +159,7 @@ class RestRaftServer : Callable<String> {
     }
 
     private suspend fun ResourceScope.installRaftMachine(
-        raftClusterNode: RaftClusterNode,
+        raftCluster: RaftCluster,
         raftLog: InMemoryRaftLog,
         coroutineScope: CoroutineScope
     ) = install(
@@ -170,7 +170,7 @@ class RestRaftServer : Callable<String> {
                     leaderElectionTimeoutJitterMs = leaderJitter,
                     heartbeatTimeoutMs = heartbeatTimeout
                 ),
-                cluster = raftClusterNode,
+                cluster = raftCluster,
                 log = raftLog,
                 stateMachine = object : StateMachine {
 

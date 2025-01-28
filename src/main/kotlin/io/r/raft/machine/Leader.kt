@@ -1,14 +1,16 @@
 package io.r.raft.machine
 
 import io.r.raft.log.RaftLog
+import io.r.raft.log.RaftLog.Companion.getLastMetadata
 import io.r.raft.protocol.Index
+import io.r.raft.protocol.LogEntry
 import io.r.raft.protocol.LogEntryMetadata
 import io.r.raft.protocol.NodeId
 import io.r.raft.protocol.RaftMessage
 import io.r.raft.protocol.RaftRole
 import io.r.raft.protocol.RaftRpc
-import io.r.raft.transport.RaftClusterNode
-import io.r.raft.transport.RaftClusterNode.Companion.quorum
+import io.r.raft.transport.RaftCluster
+import io.r.raft.transport.RaftCluster.Companion.quorum
 import io.r.utils.logs.entry
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineName
@@ -23,7 +25,7 @@ import org.apache.logging.log4j.LogManager
 class Leader(
     override val serverState: ServerState,
     override val log: RaftLog,
-    override val clusterNode: RaftClusterNode,
+    override val cluster: RaftCluster,
     override val changeRole: suspend (RaftRole) -> Role,
     private val scope: CoroutineScope,
     private val configuration: RaftMachine.Configuration,
@@ -36,11 +38,12 @@ class Leader(
 
     override suspend fun onEnter() {
         check(heartbeat == null) { "Heartbeat already started" }
-        peers += clusterNode.peers
+        serverState.leader = cluster.id
+        peers += cluster.peers
             .associateWith { PeerState(log.getLastIndex() + 1, 0) }
         val cont = peers.map { CompletableDeferred<Unit>() }
         heartbeat = scope.launch {
-            clusterNode.peers.forEachIndexed { idx, peer ->
+            cluster.peers.forEachIndexed { idx, peer ->
                 launch(CoroutineName("Heartbeat-$peer")) {
                     cont[idx].complete(Unit)
                     logger.debug(entry("Starting_Heartbeat", "peer" to peer))
@@ -63,22 +66,35 @@ class Leader(
         logger.debug(entry("Stopping_Heartbeat"))
         heartbeat?.cancel()
         heartbeat = null
+        serverState.leader = null
     }
 
     override suspend fun onReceivedMessage(message: RaftMessage) {
         require(message.rpc.term <= log.getTerm()) { "Leader received message with higher term" }
 
         when (message.rpc) {
+            is RaftRpc.JoinCluster -> {
+                log.append(
+                    log.getLastMetadata(),
+                    listOf(
+                        LogEntry(
+                            term = log.getTerm(),
+                            entry = LogEntry.ConfigurationChange(new = listOf(message.rpc.node))
+                        )
+                    )
+                )
+                cluster.addPeer(message.rpc.node)
+            }
             is RaftRpc.AppendEntriesResponse -> {
                 updatePeerMetadata(message.from, message.rpc)
                 // Update commit index, this needs to be done after updating the peer metadata
                 serverState.commitIndex = getQuorum()
                 getNextBatch(message.from, message.rpc)?.let { (prev, entries) ->
-                    clusterNode.send(
+                    cluster.send(
                         message.from,
                         RaftRpc.AppendEntries(
                             term = log.getTerm(),
-                            leaderId = clusterNode.id,
+                            leaderId = cluster.id,
                             prevLog = prev,
                             entries = entries,
                             leaderCommit = serverState.commitIndex
@@ -88,7 +104,7 @@ class Leader(
             }
 
             is RaftRpc.AppendEntries -> {
-                clusterNode.send(
+                cluster.send(
                     message.from,
                     RaftRpc.AppendEntriesResponse(
                         term = log.getTerm(),
@@ -100,7 +116,7 @@ class Leader(
             }
 
             is RaftRpc.RequestVote -> {
-                clusterNode.send(
+                cluster.send(
                     message.from,
                     RaftRpc.RequestVoteResponse(
                         term = message.rpc.term,
@@ -125,7 +141,7 @@ class Leader(
                     return@forEach
                 }
                 val count = peers.values.count { it.matchIndex >= index }
-                if ((count + 1) >= clusterNode.quorum) {
+                if ((count + 1) >= cluster.quorum) {
                     return index
                 }
             }
@@ -143,7 +159,7 @@ class Leader(
             ?.let { (nextIndex) ->
                 val previous = log.getMetadata(nextIndex - 1)
 
-                checkNotNull(previous) { "Out of sync node=${clusterNode.id} term=${log.getTerm()} peer=$from state=${peers[from]} nextIndex=$nextIndex" }
+                checkNotNull(previous) { "Out of sync node=${cluster.id} term=${log.getTerm()} peer=$from state=${peers[from]} nextIndex=$nextIndex" }
 
                 val entries = when {
                     message.success -> log.getEntries(nextIndex, configuration.maxLogEntriesPerAppend)
@@ -178,12 +194,12 @@ class Leader(
     private suspend fun NodeId.sendHeartbeat() {
         val (nextIndex, matchIndex, lastTimeContacted) = peers[this]!!
         val entries = log.getEntries(nextIndex, configuration.maxLogEntriesPerAppend)
-        logger.debug("${clusterNode.id} Heartbeat (last ${System.currentTimeMillis() - lastTimeContacted}ms ago) => ${this}[T${log.getTerm()},$nextIndex,$matchIndex] (${entries.size})")
-        clusterNode.send(
+        logger.debug("${cluster.id} Heartbeat (last ${System.currentTimeMillis() - lastTimeContacted}ms ago) => ${this}[T${log.getTerm()},$nextIndex,$matchIndex] (${entries.size})")
+        cluster.send(
             this,
             RaftRpc.AppendEntries(
                 term = log.getTerm(),
-                leaderId = clusterNode.id,
+                leaderId = cluster.id,
                 prevLog = log.getMetadata(nextIndex - 1) ?: LogEntryMetadata.ZERO,
                 entries = entries,
                 leaderCommit = serverState.commitIndex

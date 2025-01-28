@@ -17,7 +17,7 @@ import io.ktor.util.collections.ConcurrentSet
 import io.r.raft.protocol.NodeId
 import io.r.raft.protocol.RaftMessage
 import io.r.raft.protocol.RaftRpc
-import io.r.raft.transport.RaftClusterNode
+import io.r.raft.transport.RaftCluster
 import io.r.utils.logs.entry
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.Channel
@@ -28,10 +28,10 @@ import kotlinx.serialization.json.Json
 import org.apache.logging.log4j.LogManager
 import org.apache.logging.log4j.Logger
 
-class KtorRestRaftClusterNode(
+class KtorRestRaftCluster(
     override val id: NodeId,
     peers: Set<RestNodeAddress>
-) : RaftClusterNode {
+) : RaftCluster {
 
     data class RestNodeAddress(val id: NodeId, val host: String) {
         companion object {
@@ -42,9 +42,9 @@ class KtorRestRaftClusterNode(
         }
     }
 
+    val peersMap = (peers.associateBy { it.id } - id).toMutableMap()
     private val json = Json
     private val client = HttpClient(CIO)
-    private val peersMap = peers.associateBy { it.id } - id
     private val unavailableNodes = ConcurrentSet<NodeId>()
 
     override val peers: Set<NodeId> = peersMap.keys
@@ -54,7 +54,7 @@ class KtorRestRaftClusterNode(
         client.launch(Dispatchers.IO) {
             val address = peersMap[to] ?: error("Unknown node $to")
             runCatching {
-                val response = client.post("${address.host}/raft/${id}") {
+                val response = client.post("${address.host}/raft/${id}/rpc") {
                     contentType(ContentType.Application.Json)
                     setBody(json.encodeToString(rpc))
                 }
@@ -71,8 +71,12 @@ class KtorRestRaftClusterNode(
         }
     }
 
+    override fun addPeer(node: RaftRpc.ClusterNode) {
+        peersMap[node.id] = RestNodeAddress(node.id, "http://${node.host}:${node.port}")
+    }
+
     val endpoints: Route.() -> Unit = {
-        route("/{nodeId}") {
+        route("/{nodeId}/rpc") {
             post {
                 val nodeId = checkNotNull(call.parameters["nodeId"])
                 val string = call.receiveText()
@@ -90,6 +94,6 @@ class KtorRestRaftClusterNode(
     }
 
     companion object {
-        val logger: Logger = LogManager.getLogger(KtorRestRaftClusterNode::class.java)
+        val logger: Logger = LogManager.getLogger(KtorRestRaftCluster::class.java)
     }
 }

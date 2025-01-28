@@ -51,4 +51,14 @@ sealed interface RaftRpc {
     ) : RaftRpc {
         override fun describe(): String = "AppendEntriesResponse(term=$term, match=$matchIndex, s=$success, e=$entries)"
     }
+
+    @Serializable
+    data class JoinCluster(
+        override val term: Term,
+        val node: ClusterNode
+    ) : RaftRpc {
+        override fun describe(): String = "JoinCluster(term=$term, nodeId=[${node.id}@${node.host}:${node.port}])"
+    }
+    @Serializable
+    data class ClusterNode(val id: NodeId, val host: String, val port: Int)
 }

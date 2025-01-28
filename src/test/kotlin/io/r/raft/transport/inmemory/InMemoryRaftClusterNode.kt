@@ -3,17 +3,15 @@ package io.r.raft.transport.inmemory
 import io.r.raft.protocol.NodeId
 import io.r.raft.protocol.RaftMessage
 import io.r.raft.protocol.RaftRpc
-import io.r.raft.transport.RaftClusterNode
-import kotlinx.coroutines.channels.Channel
+import io.r.raft.transport.RaftCluster
 import kotlinx.coroutines.channels.ReceiveChannel
 
 class InMemoryRaftClusterNode(
     override val id: NodeId,
-    private val _peers: Map<NodeId, Channel<RaftMessage>>,
-) : RaftClusterNode {
-    override val peers: Set<NodeId> get() = _peers.keys - id
-    override val input: ReceiveChannel<RaftMessage>
-        get() = _peers[id] ?: error("Self node not found in peers")
+    private val cluster: RaftClusterInMemoryNetwork,
+) : RaftCluster {
+    override val peers: Set<NodeId> get() = cluster.nodes - id
+    override val input: ReceiveChannel<RaftMessage> = cluster.createPeer(id)
 
     override suspend fun send(to: NodeId, rpc: RaftRpc) {
         val message = RaftMessage(
@@ -21,8 +19,10 @@ class InMemoryRaftClusterNode(
             to = to,
             rpc = rpc
         )
-        (_peers[to] ?: error("Node $to not found"))
-            .send(message)
+        cluster.send(message)
     }
 
+    override fun addPeer(node: RaftRpc.ClusterNode) {
+        cluster.createPeer(node.id)
+    }
 }
