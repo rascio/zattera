@@ -11,7 +11,8 @@ import io.r.raft.protocol.RaftRpc.AppendEntries
 import io.r.raft.protocol.RaftRpc.AppendEntriesResponse
 import io.r.raft.test.RaftLogBuilderScope.Companion.raftLog
 import io.r.raft.test.shouldReceive
-import io.r.raft.transport.inmemory.InMemoryRaftClusterNode
+import io.r.raft.transport.RaftCluster
+import io.r.raft.transport.inmemory.InMemoryRaftClusterNode.Companion.shouldReceive
 import io.r.raft.transport.inmemory.installRaftClusterNetwork
 import kotlin.time.Duration.Companion.seconds
 
@@ -22,9 +23,8 @@ class FollowerTest : FunSpec({
     context("A node in Follower state") {
         resourceScope {
             val network = installRaftClusterNetwork()
-            val N1 = network.createPeer("N1")
-            val N2 = network.createPeer("N2")
-            val clusterNode = InMemoryRaftClusterNode("UnderTest", network)
+            val N1 = network.createNode("N1")
+            val N2 = network.createNode("N2")
             val log = raftLog {
                 term = 0L
                 +"Hello World"
@@ -34,7 +34,7 @@ class FollowerTest : FunSpec({
             val underTest = Follower(
                 serverState = ServerState(0L, 0L),
                 log = log,
-                cluster = clusterNode,
+                cluster = RaftCluster("UnderTest", network),
                 changeRole = changeRoleFn,
                 configuration = RaftMachine.Configuration(
                     leaderElectionTimeoutMs = 1000

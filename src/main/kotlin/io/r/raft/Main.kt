@@ -29,7 +29,6 @@ import io.r.utils.logs.entry
 import kotlinx.coroutines.CoroutineName
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.runBlocking
 import org.apache.logging.log4j.LogManager
 import picocli.CommandLine
@@ -94,10 +93,11 @@ class RestRaftServer : Callable<String> {
     private suspend fun ResourceScope.execute() {
         val raftLog = InMemoryRaftLog()
 //        val raftClusterNode = KtorRestRaftClusterBck(id, peers.map(RestNodeAddress::parse).toSet())
-        val raftClusterNode = autoCloseable { HttpRaftCluster(id, debugMessages = debugMessages) }
+        val httpRaftClusterPeers = autoCloseable { HttpRaftCluster() }
+        val raftCluster = RaftCluster(id, httpRaftClusterPeers, debugMessages)
 
         val raftMachine = installRaftMachine(
-            raftCluster = raftClusterNode,
+            raftCluster = raftCluster,
             raftLog = raftLog,
             coroutineScope = CoroutineScope(Dispatchers.IO)
         )
@@ -108,7 +108,7 @@ class RestRaftServer : Callable<String> {
         )
         logger.info(entry("Server_started", "id" to id, "port" to port))
         if (peers.isNotEmpty()) {
-            raftClusterNode.changeConfiguration(
+            raftCluster.changeConfiguration(
                 LogEntry.ConfigurationChange(
                     new = peers.map { it.toClusterNode() }
                 )

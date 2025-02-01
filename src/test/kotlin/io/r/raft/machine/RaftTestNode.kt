@@ -25,14 +25,17 @@ suspend fun ResourceScope.installRaftTestNode(
     nodeId: NodeId,
     cluster: RaftClusterInMemoryNetwork,
     configuration: RaftMachine.Configuration = RaftMachine.Configuration(),
-    startHeartbeat: Boolean = true
+    start: Boolean = true
 ) = install(
     acquire = {
         RaftTestNode(
             raftClusterInMemoryNetwork = cluster,
             nodeId = nodeId,
             configuration = configuration
-        ).apply { if (startHeartbeat) start() }
+        ).apply {
+            cluster.createNode(nodeId)
+            if (start) start()
+        }
     },
     release = { n, _ -> n.stop() }
 )
@@ -52,7 +55,7 @@ class RaftTestNode private constructor(
             scope: CoroutineScope? = null
         ) = RaftTestNode(
             raftClusterInMemoryNetwork = raftClusterInMemoryNetwork,
-            raftCluster = raftClusterInMemoryNetwork.createCluster(nodeId),
+            raftCluster = RaftCluster(nodeId, raftClusterInMemoryNetwork),
             configuration = configuration,
             _log = InMemoryRaftLog(),
             scope = scope ?: CoroutineScope(Dispatchers.IO)
@@ -65,7 +68,7 @@ class RaftTestNode private constructor(
     val commitIndex get() = _raftMachine.get().commitIndex
     val raftMachine: RaftMachine get() = _raftMachine.get()
     val log get() = _log
-    val id: NodeId = raftCluster.id
+    val id: NodeId get() = raftCluster.id
     val roleChanges get() = raftMachine.role
 
     var stateMachineApplyDelayMs = 0L
@@ -98,7 +101,7 @@ class RaftTestNode private constructor(
     }
 
     private fun newRaftMachine() = RaftMachine(
-        input = raftClusterInMemoryNetwork.createPeer(id),
+        input = raftClusterInMemoryNetwork.channel(id),
         configuration = configuration,
         log = _log,
         cluster = raftCluster,

@@ -101,7 +101,10 @@ suspend fun ResourceScope.installRaftTestCluster(
                 nodeId = id,
                 configuration = config(id),
                 scope = scope
-            ).apply { start() }
+            ).apply {
+                network.createNode(id)
+                start()
+            }
         }) { node, _ -> node.stop() }
     }
     return RaftTestCluster(nodes)

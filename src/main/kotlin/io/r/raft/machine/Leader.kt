@@ -17,6 +17,7 @@ import kotlinx.coroutines.CoroutineName
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.joinAll
 import kotlinx.coroutines.launch
@@ -46,17 +47,20 @@ class Leader(
             cluster.peers.forEachIndexed { idx, peer ->
                 launch(CoroutineName("Heartbeat-$peer")) {
                     cont[idx].complete(Unit)
-                    logger.debug(entry("Starting_Heartbeat", "peer" to peer))
-                    while (isActive) {
-                        val now = System.currentTimeMillis()
-                        val lastPeerContactedTime = peers[peer]?.lastContactTime ?: Long.MIN_VALUE
-                        val nextHeartbeatTime = lastPeerContactedTime + this@Leader.configuration.heartbeatTimeoutMs
-                        if (now >= nextHeartbeatTime) {
-                            peer.sendHeartbeat()
-                        }
-                        delay(this@Leader.configuration.heartbeatTimeoutMs)
-                    }
+                    startHeartBeat(peer)
                 }
+            }
+            launch {
+                cluster.events
+                    .collect {
+                        if (it is RaftCluster.Connected) {
+                            val lastIndex = log.getLastIndex()
+                            peers.computeIfAbsent(it.node) {
+                                PeerState(lastIndex + 1, 0)
+                            }
+                            startHeartBeat(it.node)
+                        }
+                    }
             }
         }
         cont.joinAll()
@@ -176,6 +180,19 @@ class Leader(
                     lastContactTime = System.currentTimeMillis()
                 )
             }
+        }
+    }
+
+    private suspend fun CoroutineScope.startHeartBeat(peer: NodeId) {
+        logger.debug(entry("Starting_Heartbeat", "peer" to peer))
+        while (isActive) {
+            val now = System.currentTimeMillis()
+            val lastPeerContactedTime = peers[peer]?.lastContactTime ?: Long.MIN_VALUE
+            val nextHeartbeatTime = lastPeerContactedTime + this@Leader.configuration.heartbeatTimeoutMs
+            if (now >= nextHeartbeatTime) {
+                peer.sendHeartbeat()
+            }
+            delay(this@Leader.configuration.heartbeatTimeoutMs)
         }
     }
 

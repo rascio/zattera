@@ -1,32 +1,45 @@
 package io.r.raft.transport.inmemory
 
+import io.kotest.matchers.Matcher
+import io.kotest.matchers.should
+import io.kotest.matchers.shouldBe
+import io.r.raft.machine.RaftTestNode
 import io.r.raft.protocol.LogEntry
 import io.r.raft.protocol.NodeId
 import io.r.raft.protocol.RaftMessage
 import io.r.raft.protocol.RaftRpc
 import io.r.raft.transport.RaftCluster
-import kotlinx.coroutines.channels.ReceiveChannel
+import io.r.raft.transport.RaftService
 
 class InMemoryRaftClusterNode(
-    override val id: NodeId,
-    private val network: RaftClusterInMemoryNetwork,
-) : RaftCluster {
-    override val peers: Set<NodeId> get() = network.nodes - id
+    val id: NodeId,
+    val network: RaftClusterInMemoryNetwork
+) : RaftService {
 
-    override suspend fun send(to: NodeId, rpc: RaftRpc) {
-        val message = RaftMessage(
-            from = id,
-            to = to,
-            rpc = rpc
-        )
+    val channel get() = network.channel(id)
+
+    override suspend fun send(message: RaftMessage) {
         network.send(message)
     }
 
-    override suspend fun forward(to: NodeId, entry: LogEntry.Entry): Any {
-        TODO("Not yet implemented")
+    override suspend fun forward(entry: LogEntry.Entry): Any {
+        TODO("Not implemented")
     }
 
-    override fun changeConfiguration(entry: LogEntry.ConfigurationChange) {
-        TODO("Not yet implemented")
+    companion object {
+
+        /**
+         * Make the [RaftTestNode] receive a message from the [RaftCluster]
+         */
+        suspend inline fun InMemoryRaftClusterNode.sendTo(to: RaftTestNode, rpc: () -> RaftRpc) {
+            network.send(RaftMessage(from = id, to = to.id, rpc = rpc()))
+        }
+
+        suspend infix fun InMemoryRaftClusterNode.shouldReceive(expected: RaftMessage) {
+            network.channel(id).receive() shouldBe expected
+        }
+        suspend infix fun InMemoryRaftClusterNode.shouldReceive(matcher: Matcher<RaftMessage>) {
+            network.channel(id).receive() should matcher
+        }
     }
 }

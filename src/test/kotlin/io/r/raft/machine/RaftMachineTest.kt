@@ -15,8 +15,8 @@ import io.r.raft.protocol.RaftRpc.AppendEntries
 import io.r.raft.protocol.RaftRpc.AppendEntriesResponse
 import io.r.raft.test.failOnTimeout
 import io.r.raft.test.installCoroutine
-import io.r.raft.transport.RaftCluster
-import io.r.raft.transport.inmemory.RaftClusterInMemoryNetwork.MockedNode
+import io.r.raft.transport.inmemory.InMemoryRaftClusterNode.Companion.sendTo
+import io.r.raft.transport.inmemory.InMemoryRaftClusterNode.Companion.shouldReceive
 import io.r.raft.transport.inmemory.installRaftClusterNetwork
 import io.r.utils.awaitility.atMost
 import io.r.utils.awaitility.until
@@ -427,16 +427,4 @@ private fun CoroutineScope.startClientsSendingBatches(
             }
         }
     }
-}
-
-
-/**
- * Make the [RaftTestNode] receive a message from the [RaftCluster]
- */
-suspend inline fun MockedNode.sendTo(to: RaftTestNode, rpc: () -> RaftRpc) {
-    network.send(RaftMessage(from = id, to = to.id, rpc = rpc()))
-}
-
-private suspend infix fun MockedNode.shouldReceive(expected: RaftMessage) {
-    channel.receive() shouldBe expected
 }
