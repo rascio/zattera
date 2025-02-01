@@ -7,6 +7,7 @@ import io.r.raft.log.inmemory.InMemoryRaftLog
 import io.r.raft.protocol.LogEntry
 import io.r.raft.protocol.LogEntryMetadata
 import io.r.raft.protocol.NodeId
+import io.r.raft.protocol.RaftMessage
 import io.r.raft.protocol.RaftRole
 import io.r.raft.transport.RaftCluster
 import io.r.raft.transport.inmemory.RaftClusterInMemoryNetwork
@@ -51,7 +52,7 @@ class RaftTestNode private constructor(
             scope: CoroutineScope? = null
         ) = RaftTestNode(
             raftClusterInMemoryNetwork = raftClusterInMemoryNetwork,
-            raftCluster = raftClusterInMemoryNetwork.createNode(nodeId),
+            raftCluster = raftClusterInMemoryNetwork.createCluster(nodeId),
             configuration = configuration,
             _log = InMemoryRaftLog(),
             scope = scope ?: CoroutineScope(Dispatchers.IO)
@@ -76,6 +77,10 @@ class RaftTestNode private constructor(
         return _log.getMetadata(_log.getLastIndex())!!
     }
 
+    suspend fun send(message: RaftMessage) {
+        raftCluster.send(message.to, message.rpc)
+    }
+
     fun start() {
         raftMachine.start()
     }
@@ -93,6 +98,7 @@ class RaftTestNode private constructor(
     }
 
     private fun newRaftMachine() = RaftMachine(
+        input = raftClusterInMemoryNetwork.createPeer(id),
         configuration = configuration,
         log = _log,
         cluster = raftCluster,

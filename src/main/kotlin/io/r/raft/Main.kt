@@ -21,15 +21,15 @@ import io.r.raft.log.StateMachine
 import io.r.raft.log.inmemory.InMemoryRaftLog
 import io.r.raft.machine.RaftMachine
 import io.r.raft.protocol.LogEntry
+import io.r.raft.protocol.RaftRpc
 import io.r.raft.transport.RaftCluster
-import io.r.raft.transport.ktor.KtorRestRaftCluster
-import io.r.raft.transport.ktor.KtorRestRaftCluster.RestNodeAddress
-import io.r.raft.transport.utils.LoggingRaftClusterNode
+import io.r.raft.transport.ktor.HttpLocalRaftService
+import io.r.raft.transport.ktor.HttpRaftCluster
 import io.r.utils.logs.entry
 import kotlinx.coroutines.CoroutineName
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.runBlocking
 import org.apache.logging.log4j.LogManager
 import picocli.CommandLine
@@ -67,7 +67,7 @@ class RestRaftServer : Callable<String> {
     private var port: Int = -1
 
     @Option(names = ["--peer"], description = ["The list of peers"])
-    private lateinit var peers: List<String>
+    private var peers: List<String> = emptyList()
 
     @Option(names = ["--election-timeout"], description = ["The election timeout"])
     private var leaderTimeout: Long = -1
@@ -91,29 +91,34 @@ class RestRaftServer : Callable<String> {
         return "Started"
     }
 
-    private suspend fun ResourceScope.execute() = coroutineScope {
+    private suspend fun ResourceScope.execute() {
         val raftLog = InMemoryRaftLog()
-        val raftClusterNode = KtorRestRaftCluster(id, peers.map(RestNodeAddress::parse).toSet())
+//        val raftClusterNode = KtorRestRaftClusterBck(id, peers.map(RestNodeAddress::parse).toSet())
+        val raftClusterNode = autoCloseable { HttpRaftCluster(id, debugMessages = debugMessages) }
 
         val raftMachine = installRaftMachine(
-            raftCluster = when {
-                debugMessages -> autoCloseable { LoggingRaftClusterNode(raftClusterNode) }
-                else -> raftClusterNode
-            },
+            raftCluster = raftClusterNode,
             raftLog = raftLog,
             coroutineScope = CoroutineScope(Dispatchers.IO)
         )
         val http = installHttpServer(
-            raftClusterNode = raftClusterNode,
+            raftClusterNode = HttpLocalRaftService(raftMachine, debugMessages = debugMessages),
             raftMachine = raftMachine,
             raftLog = raftLog
         )
         logger.info(entry("Server_started", "id" to id, "port" to port))
+        if (peers.isNotEmpty()) {
+            raftClusterNode.changeConfiguration(
+                LogEntry.ConfigurationChange(
+                    new = peers.map { it.toClusterNode() }
+                )
+            )
+        }
         http.start(wait = true)
     }
 
     private suspend fun ResourceScope.installHttpServer(
-        raftClusterNode: KtorRestRaftCluster,
+        raftClusterNode: HttpLocalRaftService,
         raftMachine: RaftMachine,
         raftLog: InMemoryRaftLog
     ) = install(
@@ -129,11 +134,14 @@ class RestRaftServer : Callable<String> {
     )
 
     private fun Application.installRoutes(
-        raftClusterNode: KtorRestRaftCluster,
+        raftClusterNode: HttpLocalRaftService,
         raft: RaftMachine,
         raftLog: InMemoryRaftLog
     ) {
         routing {
+            get("/status") {
+                call.respondText("OK")
+            }
             route("/raft", raftClusterNode.endpoints)
             route("/entries") {
                 post {
@@ -168,7 +176,7 @@ class RestRaftServer : Callable<String> {
                 configuration = RaftMachine.Configuration(
                     leaderElectionTimeoutMs = leaderTimeout,
                     leaderElectionTimeoutJitterMs = leaderJitter,
-                    heartbeatTimeoutMs = heartbeatTimeout
+                    heartbeatTimeoutMs = heartbeatTimeout,
                 ),
                 cluster = raftCluster,
                 log = raftLog,
@@ -184,10 +192,22 @@ class RestRaftServer : Callable<String> {
 
                 },
                 scope = coroutineScope
-            ).apply { start() }
+            ).apply {
+                start()
+            }
         },
         release = { it, _ -> it.stop() }
     )
+}
+
+/**
+ * Transform a string with the pattern "NodeId=localhost:8082" into a [RaftRpc.ClusterNode]
+ */
+private fun String.toClusterNode(): RaftRpc.ClusterNode {
+    val (id, address) = split("=")
+    val (host, port) = address.split(":")
+    return RaftRpc.ClusterNode(id, host, port.toInt())
+
 }
 
 private fun LogEntry.Entry.describe() = when (this) {

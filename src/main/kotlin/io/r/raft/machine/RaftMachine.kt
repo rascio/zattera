@@ -4,6 +4,7 @@ import io.r.raft.log.RaftLog
 import io.r.raft.log.RaftLog.Companion.getLastMetadata
 import io.r.raft.log.StateMachine
 import io.r.raft.protocol.LogEntry
+import io.r.raft.protocol.RaftMessage
 import io.r.raft.protocol.RaftRole
 import io.r.raft.transport.RaftCluster
 import io.r.utils.encodeBase64
@@ -37,14 +38,16 @@ class RaftMachine(
     private val cluster: RaftCluster,
     private val log: RaftLog,
     private val stateMachine: StateMachine,
-    private val scope: CoroutineScope = CoroutineScope(Dispatchers.IO)
+    private val scope: CoroutineScope = CoroutineScope(Dispatchers.IO),
+    private val input: Channel<RaftMessage> = Channel(capacity = Channel.BUFFERED)
 ) {
 
-    class IncomingRequest(
-        val entry: ByteArray,
+    private class IncomingRequest(
+        val entry: LogEntry.Entry,
         val response: CompletableDeferred<Any>,
         val id: String = UUID.randomUUID().toString()
     )
+
     private val logger: Logger = LogManager.getLogger("${this::class.java}.${cluster.id}")
     private val _role: MutableStateFlow<Role> = MutableStateFlow(
         createFollower(ServerState(0, 0))
@@ -56,6 +59,7 @@ class RaftMachine(
     )
     private val waitingForCommit = ConcurrentHashMap<String, CompletableDeferred<Any>>()
 
+    val id get() = cluster.id
     val serverState get() = _role.value.serverState
     val commitIndex get() = _role.value.serverState.commitIndex
     val role: Flow<RaftRole>
@@ -77,7 +81,7 @@ class RaftMachine(
                     applyCommittedEntries()
 
                     select {
-                        cluster.input.onReceive { message ->
+                        input.onReceive { message ->
                             if (message.rpc.term > log.getTerm()) {
                                 log.setTerm(message.rpc.term)
                                 changeRole(RaftRole.FOLLOWER)
@@ -89,7 +93,7 @@ class RaftMachine(
                             _role.value.onTimeout()
                         }
                         incomingRequests.onReceive { command ->
-                            appendRequest(command)
+                            dequeueRequest(command)
                         }
                     }
                 }
@@ -98,6 +102,10 @@ class RaftMachine(
             }
             logger.info(entry("RaftMachine_Stopped", "role" to _role.value::class.simpleName, "term" to log.getTerm()))
         }
+    }
+
+    suspend fun handle(message: RaftMessage) {
+        input.send(message)
     }
 
     fun command(vararg command: ByteArray): Deferred<Unit> =
@@ -111,7 +119,7 @@ class RaftMachine(
     }
 
     suspend fun command(command: ByteArray): Deferred<Any> {
-        val entry = IncomingRequest(command, CompletableDeferred())
+        val entry = IncomingRequest(LogEntry.ClientCommand(command), CompletableDeferred())
         incomingRequests.send(entry)
         logger.info {
             entry(
@@ -123,12 +131,45 @@ class RaftMachine(
         return entry.response
     }
 
-    private suspend fun appendRequest(command: IncomingRequest) {
-        when (_role.value) {
-            is Leader -> {
+    suspend fun request(e: LogEntry.Entry): Any =
+        when (val leader = serverState.leader) {
+            id -> {
+                val entry = IncomingRequest(
+                    entry = e,
+                    response = CompletableDeferred()
+                )
+                incomingRequests.send(entry)
+                logger.info {
+                    entry(
+                        "request_sent",
+                        "id" to entry.id,
+                        "request" to when (e) {
+                            is LogEntry.ClientCommand -> e.bytes.encodeBase64()
+                            is LogEntry.ConfigurationChange -> e
+                        }
+                    )
+                }
+                entry.response.await()
+            }
+
+            null -> error("Unknown leader")
+            else -> cluster.forward(leader, e)
+        }
+
+    private suspend fun dequeueRequest(command: IncomingRequest) {
+        when {
+            _role.value is Leader -> {
                 val term = log.getTerm()
-                val entry = LogEntry(term = term, entry = LogEntry.ClientCommand(command.entry), id = command.id)
+                val entry = LogEntry(
+                    term = term,
+                    entry = command.entry,
+                    id = command.id
+                )
                 log.append(log.getLastMetadata(), listOf(entry))
+
+                if (command.entry is LogEntry.ConfigurationChange) {
+                    cluster.changeConfiguration(command.entry)
+                }
 
                 // add to waiting queue
                 waitingForCommit[command.id] = command.response
@@ -140,6 +181,7 @@ class RaftMachine(
                         ?.cancel("Time out")
                 }
             }
+
             else -> command.response
                 .completeExceptionally(IllegalStateException("Only leader can accept commands"))
         }
@@ -167,7 +209,10 @@ class RaftMachine(
                         "client_handle" to waitingForCommit.contains(it.id)
                     )
                 }
-                val result = stateMachine.apply(it)
+                val result = when (it.entry) {
+                    is LogEntry.ClientCommand -> stateMachine.apply(it)
+                    is LogEntry.ConfigurationChange -> "ConfigurationChanged"
+                }
                 serverState.lastApplied++
                 releaseCommit(it, result)
             }
@@ -232,5 +277,4 @@ class RaftMachine(
         scope,
         configuration
     )
-
 }

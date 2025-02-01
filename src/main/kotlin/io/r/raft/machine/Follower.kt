@@ -3,6 +3,7 @@ package io.r.raft.machine
 import io.r.raft.log.RaftLog
 import io.r.raft.log.RaftLog.Companion.AppendResult
 import io.r.raft.log.RaftLog.Companion.getLastMetadata
+import io.r.raft.protocol.LogEntry
 import io.r.raft.protocol.RaftMessage
 import io.r.raft.protocol.RaftRole
 import io.r.raft.protocol.RaftRpc
@@ -47,6 +48,12 @@ class Follower(
             val rcp = when (result) {
                 is AppendResult.Appended -> {
                     serverState.commitIndex = message.rpc.leaderCommit
+
+                    message.rpc
+                        .entries
+                        .filterIsInstance<LogEntry.ConfigurationChange>()
+                        .forEach { cluster.changeConfiguration(it) }
+
                     RaftRpc.AppendEntriesResponse(
                         term = log.getTerm(),
                         matchIndex = result.index,

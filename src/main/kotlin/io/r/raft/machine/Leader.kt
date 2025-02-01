@@ -73,18 +73,6 @@ class Leader(
         require(message.rpc.term <= log.getTerm()) { "Leader received message with higher term" }
 
         when (message.rpc) {
-            is RaftRpc.JoinCluster -> {
-                log.append(
-                    log.getLastMetadata(),
-                    listOf(
-                        LogEntry(
-                            term = log.getTerm(),
-                            entry = LogEntry.ConfigurationChange(new = listOf(message.rpc.node))
-                        )
-                    )
-                )
-                cluster.addPeer(message.rpc.node)
-            }
             is RaftRpc.AppendEntriesResponse -> {
                 updatePeerMetadata(message.from, message.rpc)
                 // Update commit index, this needs to be done after updating the peer metadata

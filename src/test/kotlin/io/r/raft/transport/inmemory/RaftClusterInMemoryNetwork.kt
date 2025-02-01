@@ -33,13 +33,19 @@ class RaftClusterInMemoryNetwork(private val scope: ResourceScope, vararg nodeId
         node.send(message)
     }
 
-    suspend fun createNode(name: NodeId, logging: Boolean = true): RaftCluster {
-        createPeer(name)
-        var clusterNode: RaftCluster = InMemoryRaftClusterNode(name, this)
-
-        if (logging) {
-            clusterNode = scope.autoCloseable { LoggingRaftClusterNode(clusterNode) }
+    class MockedNode(
+        val id: NodeId,
+        val channel: Channel<RaftMessage>,
+        val network: RaftClusterInMemoryNetwork
+    ) {
+        suspend fun send(to: NodeId, rpc: RaftRpc) {
+            channel.send(RaftMessage(id, to, rpc))
         }
+    }
+    fun createCluster(name: NodeId, logging: Boolean = true): RaftCluster {
+        createPeer(name)
+        val clusterNode: RaftCluster = InMemoryRaftClusterNode(name, this)
+
         return object : RaftCluster by clusterNode {
             override suspend fun send(to: NodeId, rpc: RaftRpc) {
                 when {
@@ -52,11 +58,17 @@ class RaftClusterInMemoryNetwork(private val scope: ResourceScope, vararg nodeId
                     }
 
                     else -> {
+                        if (logging) {
+                            logger.info("$name == ${rpc.describe()} ==> $to")
+                        }
                         clusterNode.send(to, rpc)
                     }
                 }
             }
         }
+    }
+    fun createNode(name: NodeId): MockedNode {
+        return MockedNode(name, createPeer(name), this)
     }
 
     fun disconnect(vararg nodeIds: NodeId) {

@@ -16,6 +16,7 @@ import io.r.raft.protocol.RaftRpc.AppendEntriesResponse
 import io.r.raft.test.failOnTimeout
 import io.r.raft.test.installCoroutine
 import io.r.raft.transport.RaftCluster
+import io.r.raft.transport.inmemory.RaftClusterInMemoryNetwork.MockedNode
 import io.r.raft.transport.inmemory.installRaftClusterNetwork
 import io.r.utils.awaitility.atMost
 import io.r.utils.awaitility.until
@@ -92,8 +93,8 @@ class RaftMachineTest : FunSpec({
                     failOnTimeout("timeout waiting for leader", 50.milliseconds) {
                         underTest.roleChanges.first { it == RaftRole.LEADER }
                     }
-                    N1.input.receive().rpc.shouldBeInstanceOf<AppendEntries>() // discard heartbeat
-                    N2.input.receive().rpc.shouldBeInstanceOf<AppendEntries>() // discard heartbeat
+                    N1.channel.receive().rpc.shouldBeInstanceOf<AppendEntries>() // discard heartbeat
+                    N2.channel.receive().rpc.shouldBeInstanceOf<AppendEntries>() // discard heartbeat
 
                     // Send a RequestVote with a higher term
                     val newTerm = underTest.getCurrentTerm() + 1
@@ -142,7 +143,7 @@ class RaftMachineTest : FunSpec({
                     failOnTimeout("timeout waiting for leader", 1.seconds) {
                         underTest.roleChanges.first { it == RaftRole.LEADER }
                     }
-                    N1.input.receive() // heartbeat
+                    N1.channel.receive() // heartbeat
 
                     // Send an AppendEntries with a higher term
                     N1.sendTo(underTest) {
@@ -432,10 +433,10 @@ private fun CoroutineScope.startClientsSendingBatches(
 /**
  * Make the [RaftTestNode] receive a message from the [RaftCluster]
  */
-suspend inline fun RaftCluster.sendTo(to: RaftTestNode, rpc: () -> RaftRpc) {
-    send(to.id, rpc())
+suspend inline fun MockedNode.sendTo(to: RaftTestNode, rpc: () -> RaftRpc) {
+    network.send(RaftMessage(from = id, to = to.id, rpc = rpc()))
 }
 
-private suspend infix fun RaftCluster.shouldReceive(expected: RaftMessage) {
-    input.receive() shouldBe expected
+private suspend infix fun MockedNode.shouldReceive(expected: RaftMessage) {
+    channel.receive() shouldBe expected
 }

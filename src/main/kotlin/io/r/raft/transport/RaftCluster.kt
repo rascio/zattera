@@ -1,8 +1,10 @@
 package io.r.raft.transport
 
+import io.r.raft.protocol.LogEntry
 import io.r.raft.protocol.NodeId
 import io.r.raft.protocol.RaftMessage
 import io.r.raft.protocol.RaftRpc
+import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.channels.ReceiveChannel
 
 /**
@@ -19,10 +21,11 @@ interface RaftCluster {
      * The set of nodes in the cluster, excluding the current node.
      */
     val peers: Set<NodeId>
-    val input: ReceiveChannel<RaftMessage>
 
     suspend fun send(to: NodeId, rpc: RaftRpc)
-    fun addPeer(node: RaftRpc.ClusterNode)
+    suspend fun forward(to: NodeId, entry: LogEntry.Entry): Any
+
+    fun changeConfiguration(entry: LogEntry.ConfigurationChange)
 
     companion object {
         val RaftCluster.quorum: Int

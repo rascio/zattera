@@ -8,7 +8,11 @@ import io.r.raft.protocol.RaftRole
 import io.r.raft.transport.RaftCluster
 
 typealias RoleTransition = suspend (RaftRole) -> Role
-data class ServerState(var commitIndex: Index, var lastApplied: Index, var leader: NodeId? = null)
+data class ServerState(
+    var commitIndex: Index,
+    var lastApplied: Index,
+    var leader: NodeId? = null
+)
 sealed class Role {
     abstract val serverState: ServerState
     abstract val timeout: Long

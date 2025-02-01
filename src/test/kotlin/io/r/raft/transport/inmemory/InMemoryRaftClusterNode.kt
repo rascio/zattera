@@ -1,5 +1,6 @@
 package io.r.raft.transport.inmemory
 
+import io.r.raft.protocol.LogEntry
 import io.r.raft.protocol.NodeId
 import io.r.raft.protocol.RaftMessage
 import io.r.raft.protocol.RaftRpc
@@ -8,10 +9,9 @@ import kotlinx.coroutines.channels.ReceiveChannel
 
 class InMemoryRaftClusterNode(
     override val id: NodeId,
-    private val cluster: RaftClusterInMemoryNetwork,
+    private val network: RaftClusterInMemoryNetwork,
 ) : RaftCluster {
-    override val peers: Set<NodeId> get() = cluster.nodes - id
-    override val input: ReceiveChannel<RaftMessage> = cluster.createPeer(id)
+    override val peers: Set<NodeId> get() = network.nodes - id
 
     override suspend fun send(to: NodeId, rpc: RaftRpc) {
         val message = RaftMessage(
@@ -19,10 +19,14 @@ class InMemoryRaftClusterNode(
             to = to,
             rpc = rpc
         )
-        cluster.send(message)
+        network.send(message)
     }
 
-    override fun addPeer(node: RaftRpc.ClusterNode) {
-        cluster.createPeer(node.id)
+    override suspend fun forward(to: NodeId, entry: LogEntry.Entry): Any {
+        TODO("Not yet implemented")
+    }
+
+    override fun changeConfiguration(entry: LogEntry.ConfigurationChange) {
+        TODO("Not yet implemented")
     }
 }
