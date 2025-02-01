@@ -147,9 +147,9 @@ class RestRaftServer : Callable<String> {
                 post {
                     val entry = call.receive<ByteArray>()
                     runCatching {
-                        raft.command(entry).join()
+                        raft.request(LogEntry.ClientCommand(entry))
                     }.onSuccess {
-                        call.respondText("OK")
+                        call.respondText(it.toString())
                     }.onFailure {
                         call.respondText(
                             text = "Error: ${it.message}",

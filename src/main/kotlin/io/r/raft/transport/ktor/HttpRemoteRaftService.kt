@@ -2,6 +2,7 @@ package io.r.raft.transport.ktor
 
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.cio.CIO
+import io.ktor.client.plugins.HttpTimeout
 import io.ktor.client.request.post
 import io.ktor.client.request.setBody
 import io.ktor.client.statement.readBytes
@@ -21,7 +22,13 @@ class HttpRemoteRaftService(
     private val node: RaftRpc.ClusterNode
 ) : RaftService, AutoCloseable {
 
-    private val client = HttpClient(CIO)
+    private val client = HttpClient(CIO) {
+        install(HttpTimeout) {
+            connectTimeoutMillis = 1000
+            socketTimeoutMillis = 500
+            requestTimeoutMillis = 1000
+        }
+    }
     private val json = Json
 
     private var connected = true

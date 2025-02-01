@@ -32,7 +32,7 @@ class RaftCluster(
     suspend fun send(to: NodeId, rpc: RaftRpc) {
         val node = getNode(to)
         if (debugMessages) {
-            logger.info("$id == ${rpc.describe()} ==> $to")
+            httpMessagesLogger.info("$id == ${rpc.describe()} ==> $to")
         }
         node.send(RaftMessage(from = id, to = to, rpc = rpc))
     }
@@ -81,6 +81,7 @@ class RaftCluster(
     data class Disconnected(val node: NodeId) : Event
 
     companion object {
+        private val httpMessagesLogger: Logger = LogManager.getLogger("HttpMessagesLogger")
         private val logger: Logger = LogManager.getLogger(RaftCluster::class.java)
 
         val RaftCluster.quorum: Int

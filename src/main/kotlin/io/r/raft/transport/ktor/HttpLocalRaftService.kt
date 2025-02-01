@@ -15,6 +15,7 @@ import io.r.raft.protocol.RaftRpc
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.json.Json
 import org.apache.logging.log4j.LogManager
+import org.apache.logging.log4j.Logger
 
 class HttpLocalRaftService(
     private val raftMachine: RaftMachine,
@@ -29,7 +30,7 @@ class HttpLocalRaftService(
                 val body = call.receiveText()
                 val payload = json.decodeFromString(RaftRpc.serializer(), body)
                 if (debugMessages) {
-                    logger.info("${raftMachine.id} <== ${payload.describe()} == $nodeId")
+                    httpMessagesLogger.info("${raftMachine.id} <== ${payload.describe()} == $nodeId")
                 }
                 raftMachine.handle(
                     RaftMessage(
@@ -46,7 +47,7 @@ class HttpLocalRaftService(
                 val body = call.receiveText()
                 val payload = json.decodeFromString<LogEntry.Entry>(body)
                 if (debugMessages) {
-                    logger.info("${raftMachine.id} <-- $payload -- ${raftMachine.id}")
+                    httpMessagesLogger.info("${raftMachine.id} <-- $payload -- ${raftMachine.id}")
                 }
                 raftMachine.request(payload)
                 "OK2"
@@ -65,6 +66,6 @@ class HttpLocalRaftService(
     }
 
     companion object {
-        val logger = LogManager.getLogger(HttpLocalRaftService::class.java)
+        private val httpMessagesLogger: Logger = LogManager.getLogger("HttpMessagesLogger")
     }
 }

@@ -30,7 +30,7 @@ class Candidate(
         val nextTerm = log.getTerm() + 1
         log.setTerm(nextTerm)
         votesReceived += cluster.id
-        logger.debug(entry("Starting_Election", "term" to nextTerm))
+        logger.debug(entry("Starting_Election", "term" to nextTerm, "peers" to cluster.peers))
         cluster.peers.forEach { peer ->
             cluster.send(
                 to = peer,

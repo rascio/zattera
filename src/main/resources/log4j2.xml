@@ -4,13 +4,21 @@
                xsi:schemaLocation="https://logging.apache.org/xml/ns https://logging.apache.org/xml/ns/log4j-config-2.23.1.xsd">
     <Appenders>
         <Console name="Console" target="SYSTEM_OUT">
-            <PatternLayout pattern="%d{yyyy-MM-dd HH:mm:ss.SSS} | %level{INFO=ℹ️,DEBUG=🔧,ERROR=❌,WARN=⚠️} | [%10.10t] | %c{1} | %m%n"/>
+            <PatternLayout pattern="%d{yyyy-MM-dd HH:mm:ss.SSS} | %level{INFO=ℹ️,DEBUG=🔧,ERROR=❌,WARN=⚠️} | [%10.10t] | %c{1} | %highlight{%m}{INFO=blue bold}%n"/>
+        </Console>
+        <Console name="HttpMessagesLoggerConsole" target="SYSTEM_OUT">
+            <PatternLayout pattern="%d{yyyy-MM-dd HH:mm:ss.SSS} %m%n"/>
         </Console>
         <Async name="AsyncConsole">
             <AppenderRef ref="Console"/>
         </Async>
     </Appenders>
     <Loggers>
+        <Logger name="HttpMessagesLogger" level="INFO">
+            <AppenderRef ref="HttpMessagesLoggerConsole"/>
+            <AppenderRef ref="AsyncConsole" level="OFF"/>
+        </Logger>
+
         <Logger name="io.netty" level="WARN">
             <AppenderRef ref="AsyncConsole"/>
         </Logger>
