@@ -3,6 +3,7 @@ package io.r.raft.machine
 import io.r.raft.log.RaftLog
 import io.r.raft.log.RaftLog.Companion.AppendResult
 import io.r.raft.log.RaftLog.Companion.getLastMetadata
+import io.r.raft.machine.RaftMachine.Companion.DIAGNOSTIC_MARKER
 import io.r.raft.protocol.LogEntry
 import io.r.raft.protocol.RaftMessage
 import io.r.raft.protocol.RaftRole
@@ -48,7 +49,14 @@ class Follower(
             val rcp = when (result) {
                 is AppendResult.Appended -> {
                     serverState.commitIndex = message.rpc.leaderCommit
-
+                    logger.debug(DIAGNOSTIC_MARKER) {
+                        entry(
+                            "Committed",
+                            "term" to message.rpc.term,
+                            "index" to result.index,
+                            "commitIndex" to message.rpc.leaderCommit
+                        )
+                    }
                     message.rpc
                         .entries
                         .filterIsInstance<LogEntry.ConfigurationChange>()

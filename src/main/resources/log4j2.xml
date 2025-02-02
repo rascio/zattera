@@ -4,26 +4,25 @@
                xsi:schemaLocation="https://logging.apache.org/xml/ns https://logging.apache.org/xml/ns/log4j-config-2.23.1.xsd">
     <Appenders>
         <Console name="Console" target="SYSTEM_OUT">
-            <PatternLayout pattern="%d{yyyy-MM-dd HH:mm:ss.SSS} | %level{INFO=ℹ️,DEBUG=🔧,ERROR=❌,WARN=⚠️} | [%10.10t] | %c{1} | %highlight{%m}{INFO=blue bold}%n"/>
+            <PatternLayout pattern="%d{yyyy-MM-dd HH:mm:ss.SSS} | %level{INFO=ℹ️,DEBUG=🔧,ERROR=❌,WARN=⚠️} | [%10.10t] | %c{1} | %highlight{%m}%n"/>
         </Console>
         <Console name="HttpMessagesLoggerConsole" target="SYSTEM_OUT">
-            <PatternLayout pattern="%d{yyyy-MM-dd HH:mm:ss.SSS} %m%n"/>
+            <PatternLayout pattern="%highlight{%d{yyyy-MM-dd HH:mm:ss.SSS} %m}{INFO=white bold}%n"/>
         </Console>
         <Async name="AsyncConsole">
             <AppenderRef ref="Console"/>
         </Async>
     </Appenders>
+    <MarkerFilter marker="RAFT_DIAGNOSTIC"
+                  onMatch="DENY"
+                  onMismatch="NEUTRAL"/>
     <Loggers>
-        <Logger name="HttpMessagesLogger" level="INFO">
-            <AppenderRef ref="HttpMessagesLoggerConsole"/>
-            <AppenderRef ref="AsyncConsole" level="OFF"/>
-        </Logger>
-
-        <Logger name="io.netty" level="WARN">
-            <AppenderRef ref="AsyncConsole"/>
-        </Logger>
-        <Root level="DEBUG">
+        <Root level="WARN">
             <AppenderRef ref="AsyncConsole"/>
         </Root>
+        <Logger name="io.r.raft" level="DEBUG" />
+        <Logger name="HttpMessagesLogger" level="INFO" additivity="false">
+            <AppenderRef ref="HttpMessagesLoggerConsole"/>
+        </Logger>
     </Loggers>
 </Configuration>

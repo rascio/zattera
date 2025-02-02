@@ -25,7 +25,7 @@ class HttpRaftServiceTest : FunSpec({
         every { id } returns "local"
     }
 
-    val httpLocal = HttpLocalRaftService(raftMachine, debugMessages = true)
+    val httpLocal = HttpRaftController(raftMachine, debugMessages = true)
 
     val server = embeddedServer(Netty, port = 0) {
         install(CORS) {
@@ -48,7 +48,7 @@ class HttpRaftServiceTest : FunSpec({
             host = "localhost",
             port = port
         )
-        val httpRemote = HttpRemoteRaftService(node, client)
+        val httpRemote = HttpRaftService(node, client)
 
         test("Test can send RPC") {
 

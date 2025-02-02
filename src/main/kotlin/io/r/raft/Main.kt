@@ -23,7 +23,7 @@ import io.r.raft.machine.RaftMachine
 import io.r.raft.protocol.LogEntry
 import io.r.raft.protocol.RaftRpc
 import io.r.raft.transport.RaftCluster
-import io.r.raft.transport.ktor.HttpLocalRaftService
+import io.r.raft.transport.ktor.HttpRaftController
 import io.r.raft.transport.ktor.HttpRaftCluster
 import io.r.utils.logs.entry
 import kotlinx.coroutines.CoroutineName
@@ -65,17 +65,17 @@ class RestRaftServer : Callable<String> {
     @Option(names = ["--port"], description = ["The port of the server"])
     private var port: Int = -1
 
-    @Option(names = ["--peer"], description = ["The list of peers"])
+    @Option(names = ["--peer"], description = ["The list of peers, example value: N1=localhost:8081"])
     private var peers: List<String> = emptyList()
 
     @Option(names = ["--election-timeout"], description = ["The election timeout"])
-    private var leaderTimeout: Long = -1
+    private var leaderTimeout: Long = 500
 
     @Option(names = ["--heartbeat-timeout"], description = ["The heartbeat timeout"])
-    private var heartbeatTimeout: Long = -1
+    private var heartbeatTimeout: Long = 150
 
     @Option(names = ["--election-jitter"], description = ["The leader jitter"], required = false)
-    private var leaderJitter: Long = 50
+    private var leaderJitter: Long = 100
 
     @Option(names = ["--debug-messages"], description = ["Enable debug logs"], required = false)
     private var debugMessages: Boolean = false
@@ -102,7 +102,7 @@ class RestRaftServer : Callable<String> {
             coroutineScope = CoroutineScope(Dispatchers.IO)
         )
         val http = installHttpServer(
-            raftClusterNode = HttpLocalRaftService(raftMachine, debugMessages = debugMessages),
+            raftClusterNode = HttpRaftController(raftMachine, debugMessages = debugMessages),
             raftMachine = raftMachine,
             raftLog = raftLog
         )
@@ -118,7 +118,7 @@ class RestRaftServer : Callable<String> {
     }
 
     private suspend fun ResourceScope.installHttpServer(
-        raftClusterNode: HttpLocalRaftService,
+        raftClusterNode: HttpRaftController,
         raftMachine: RaftMachine,
         raftLog: InMemoryRaftLog
     ) = install(
@@ -134,7 +134,7 @@ class RestRaftServer : Callable<String> {
     )
 
     private fun Application.installRoutes(
-        raftClusterNode: HttpLocalRaftService,
+        raftClusterNode: HttpRaftController,
         raft: RaftMachine,
         raftLog: InMemoryRaftLog
     ) {

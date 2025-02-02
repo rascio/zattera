@@ -51,17 +51,18 @@ class Leader(
                 }
             }
             launch {
-                cluster.events
-                    .collect {
-                        if (it is RaftCluster.Connected) {
-                            val lastIndex = log.getLastIndex()
-                            peers.computeIfAbsent(it.node) {
-                                PeerState(lastIndex + 1, 0)
-                            }
-                            startHeartBeat(it.node)
-                            logger.info("Connected ${it.node} => ${cluster.peers}")
+                cluster.events.collect {
+                    if (it is RaftCluster.Connected) {
+                        val lastIndex = log.getLastIndex()
+                        peers.computeIfAbsent(it.node) {
+                            PeerState(lastIndex + 1, 0)
                         }
+                        launch {
+                            startHeartBeat(it.node)
+                        }
+                        logger.info("Connected ${it.node} => ${cluster.peers}")
                     }
+                }
             }
         }
         cont.joinAll()
@@ -200,11 +201,23 @@ class Leader(
     private suspend fun NodeId.sendHeartbeat() {
         val (nextIndex, matchIndex, lastTimeContacted) = peers[this]!!
         val entries = log.getEntries(nextIndex, configuration.maxLogEntriesPerAppend)
-        logger.debug("${cluster.id} Heartbeat (last ${System.currentTimeMillis() - lastTimeContacted}ms ago) => ${this}[T${log.getTerm()},$nextIndex,$matchIndex] (${entries.size})")
+        val term = log.getTerm()
+        logger.debug {
+            entry(
+                "Heartbeat",
+                "from" to cluster.id,
+                "to" to this,
+                "lastContact" to System.currentTimeMillis() - lastTimeContacted,
+                "term" to term,
+                "nextIndex" to nextIndex,
+                "matchIndex" to matchIndex,
+                "entries" to entries.size
+            )
+        }
         cluster.send(
             this,
             RaftRpc.AppendEntries(
-                term = log.getTerm(),
+                term = term,
                 leaderId = cluster.id,
                 prevLog = log.getMetadata(nextIndex - 1) ?: LogEntryMetadata.ZERO,
                 entries = entries,

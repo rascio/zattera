@@ -12,11 +12,12 @@ import io.r.raft.protocol.RaftMessage
 import io.r.raft.protocol.RaftRpc
 import io.r.raft.transport.RaftService
 import io.r.utils.logs.entry
+import kotlinx.coroutines.withTimeout
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import org.apache.logging.log4j.LogManager
 
-class HttpRemoteRaftService(
+class HttpRaftService(
     private val node: RaftRpc.ClusterNode,
     private val client: HttpClient
 ) : RaftService, AutoCloseable {
@@ -27,21 +28,23 @@ class HttpRemoteRaftService(
 
     override suspend fun send(message: RaftMessage) {
         runCatching {
-            val response = client.post("http://${node.host}:${node.port}/raft/${message.from}/rpc") {
-                contentType(ContentType.Application.Json)
-                setBody(json.encodeToString(message.rpc))
-            }
-            if (response.status != HttpStatusCode.Accepted) {
-                logger.warn(
-                    entry(
-                        "error_sending",
-                        "to" to node.id,
-                        "message" to message.rpc.describe(),
-                        "status" to response.status
+            withTimeout(5000) {
+                val response = client.post("http://${node.host}:${node.port}/raft/${message.from}/rpc") {
+                    contentType(ContentType.Application.Json)
+                    setBody(json.encodeToString(message.rpc))
+                }
+                if (response.status != HttpStatusCode.Accepted) {
+                    logger.warn(
+                        entry(
+                            "server_error_response",
+                            "to" to node.id,
+                            "message" to message.rpc.describe(),
+                            "status" to response.status
+                        )
                     )
-                )
-            } else {
-                connected = true
+                } else {
+                    connected = true
+                }
             }
         }.onFailure { e ->
             if (connected) {
@@ -51,8 +54,7 @@ class HttpRemoteRaftService(
                         "to" to node.id,
                         "message" to message.rpc.describe(),
                         "error" to e.message
-                    ),
-                    e
+                    )
                 )
                 connected = false
             }
@@ -84,6 +86,6 @@ class HttpRemoteRaftService(
     }
 
     companion object {
-        private val logger = LogManager.getLogger(HttpRemoteRaftService::class.java)
+        private val logger = LogManager.getLogger(HttpRaftService::class.java)
     }
 }

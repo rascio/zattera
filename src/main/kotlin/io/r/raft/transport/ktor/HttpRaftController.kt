@@ -17,7 +17,7 @@ import kotlinx.serialization.json.Json
 import org.apache.logging.log4j.LogManager
 import org.apache.logging.log4j.Logger
 
-class HttpLocalRaftService(
+class HttpRaftController(
     private val raftMachine: RaftMachine,
     private val debugMessages: Boolean = false
 ) {
@@ -66,6 +66,6 @@ class HttpLocalRaftService(
     }
 
     companion object {
-        private val httpMessagesLogger: Logger = LogManager.getLogger("HttpMessagesLogger")
+        private val httpMessagesLogger: Logger = LogManager.getLogger("HttpMessagesLogger.In")
     }
 }

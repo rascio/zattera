@@ -30,7 +30,9 @@ class Candidate(
         val nextTerm = log.getTerm() + 1
         log.setTerm(nextTerm)
         votesReceived += cluster.id
-        logger.debug(entry("Starting_Election", "term" to nextTerm, "peers" to cluster.peers))
+        logger.debug {
+            entry("Starting_Election", "term" to nextTerm, "peers" to cluster.peers)
+        }
         cluster.peers.forEach { peer ->
             cluster.send(
                 to = peer,
@@ -49,7 +51,9 @@ class Candidate(
             is RaftRpc.RequestVoteResponse -> {
                 if (message.rpc.voteGranted) {
                     votesReceived += message.from
-                    logger.debug(entry("Received_Vote", "from" to message.from, "votes" to votesReceived.size, "quorum" to floor(cluster.peers.size / 2.0)))
+                    logger.debug {
+                        entry("Received_Vote", "from" to message.from, "votes" to votesReceived.size, "quorum" to floor(cluster.peers.size / 2.0))
+                    }
                     if (votesReceived.size >= cluster.quorum) {
                         transitionTo(RaftRole.LEADER)
                     }

@@ -81,7 +81,7 @@ class RaftCluster(
     data class Disconnected(val node: NodeId) : Event
 
     companion object {
-        private val httpMessagesLogger: Logger = LogManager.getLogger("HttpMessagesLogger")
+        private val httpMessagesLogger: Logger = LogManager.getLogger("HttpMessagesLogger.Out")
         private val logger: Logger = LogManager.getLogger(RaftCluster::class.java)
 
         val RaftCluster.quorum: Int

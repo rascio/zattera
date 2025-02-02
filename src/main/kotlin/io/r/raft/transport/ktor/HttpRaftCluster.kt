@@ -20,7 +20,7 @@ class HttpRaftCluster : RaftCluster.RaftPeers, AutoCloseable {
         }
     }
 
-    private val peers = mutableMapOf<NodeId, HttpRemoteRaftService>()
+    private val peers = mutableMapOf<NodeId, HttpRaftService>()
 
     override val ids: Set<NodeId> get() = peers.keys
 
@@ -31,7 +31,7 @@ class HttpRaftCluster : RaftCluster.RaftPeers, AutoCloseable {
         peers[nodeId]
 
     override suspend fun connect(node: RaftRpc.ClusterNode) {
-        peers.computeIfAbsent(node.id) { HttpRemoteRaftService(node, client) }
+        peers.computeIfAbsent(node.id) { HttpRaftService(node, client) }
     }
 
     override suspend fun disconnect(node: RaftRpc.ClusterNode) {
