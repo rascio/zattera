@@ -7,18 +7,20 @@ import io.ktor.client.statement.readBytes
 import io.ktor.http.ContentType
 import io.ktor.http.HttpStatusCode
 import io.ktor.http.contentType
+import io.r.raft.machine.Response
 import io.r.raft.protocol.LogEntry
 import io.r.raft.protocol.RaftMessage
 import io.r.raft.protocol.RaftRpc
 import io.r.raft.transport.RaftService
 import io.r.utils.logs.entry
 import kotlinx.coroutines.withTimeout
+import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import org.apache.logging.log4j.LogManager
 
 class HttpRaftService(
-    private val node: RaftRpc.ClusterNode,
+    override val node: RaftRpc.ClusterNode,
     private val client: HttpClient
 ) : RaftService, AutoCloseable {
 
@@ -61,24 +63,20 @@ class HttpRaftService(
         }
     }
 
-    override suspend fun forward(entry: LogEntry.Entry): Result<ByteArray> =
-        runCatching {
-            val response = client.post("http://${node.host}:${node.port}/raft/request") {
-                contentType(ContentType.Application.Json)
-                setBody(json.encodeToString(entry))
-            }
-            if (response.status != HttpStatusCode.OK) {
-                logger.warn(entry("error_forwarding", "to" to node.id, "entry" to entry, "status" to response.status))
-            } else {
-                connected = true
-            }
-            response.readBytes()
-        }.onFailure { e ->
-            if (connected) {
-                logger.warn(entry("error_forwarding", "to" to node.id, "entry" to entry, "error" to e.message))
-                connected = false
-            }
+    override suspend fun request(entry: LogEntry.Entry): Response {
+        val response = client.post("http://${node.host}:${node.port}/raft/request") {
+            contentType(ContentType.Application.Json)
+            setBody(json.encodeToString(entry))
         }
+        if (response.status != HttpStatusCode.OK) {
+            logger.warn(entry("forwarding_failure", "to" to node.id, "entry" to entry, "status" to response.status))
+        } else {
+            connected = true
+        }
+        return response.readBytes()
+            .decodeToString()
+            .let { json.decodeFromString<Response>(it) }
+    }
 
     override fun close() {
         client.close()

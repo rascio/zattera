@@ -55,3 +55,12 @@ sealed interface RaftRpc {
     @Serializable
     data class ClusterNode(val id: NodeId, val host: String, val port: Int)
 }
+/**
+ * Transform a string with the pattern "NodeId=localhost:8082" into a [RaftRpc.ClusterNode]
+ */
+fun String.toClusterNode(): RaftRpc.ClusterNode {
+    val (id, address) = split("=")
+    val (host, port) = address.split(":")
+    return RaftRpc.ClusterNode(id, host, port.toInt())
+
+}

@@ -124,7 +124,7 @@ class RaftMachine(
         input.send(message)
     }
 
-    suspend fun request(e: LogEntry.Entry): ByteArray =
+    suspend fun request(e: LogEntry.Entry): Response =
         when (val leader = serverState.leader) {
             id -> {
                 val entry = IncomingRequest(
@@ -142,11 +142,11 @@ class RaftMachine(
                         }
                     )
                 }
-                entry.response.await()
+                Response.Success(entry.response.await())
             }
 
-            null -> error("Unknown leader [$id]")
-            else -> cluster.forward(leader, e).getOrThrow()
+            null -> Response.LeaderUnknown
+            else -> Response.NotALeader(cluster.getNode(leader).node)
         }
 
     private suspend fun handleClientRequest(request: IncomingRequest) {

@@ -14,11 +14,14 @@ A bad implementation of a raft consensus algorithm, just for fun.
 both support `-h` to show the help message.
 
 ### KV store example usage
-Start a nodes (on different shells)
+#### Start cluster nodes
 ```shell
-./scripts/start_node.sh -id 1 -cluster-size 3 -kv
+./scripts/start-node.sh -id 1 -cluster-size 3 -kv
 ```
-Start the KV store CLI
+`-id` can be any number, but it must be unique in the cluster.
+`-cluster-size` make the node aware of the first N nodes in the cluster.
+
+#### Start the KV store CLI
 ```shell
 ./scripts/key-value.sh shell
 ```
@@ -40,4 +43,8 @@ curl http://localhost:8081/entries
 This needs to be done before starting it
 ```shell
 curl -v http://localhost:8081/raft/request -d '{"type":"io.r.raft.protocol.LogEntry.ConfigurationChange","new":[{"id":"N4","host":"localhost","port":8084}]}' -H 'Content-Type: application/json'
+```
+and then
+```shell
+./scripts/start-node.sh -id 4 -cluster-size 3 -kv
 ```

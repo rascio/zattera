@@ -3,6 +3,7 @@ package io.r.raft.transport.inmemory
 import arrow.fx.coroutines.ResourceScope
 import arrow.fx.coroutines.autoCloseable
 import io.r.raft.machine.RaftMachine
+import io.r.raft.machine.Response
 import io.r.raft.protocol.LogEntry
 import io.r.raft.protocol.NodeId
 import io.r.raft.protocol.RaftMessage
@@ -52,7 +53,7 @@ class RaftClusterTestNetwork(
             }
         }
     }
-    suspend fun forward(id: NodeId, entry: LogEntry.Entry): ByteArray {
+    suspend fun forward(id: NodeId, entry: LogEntry.Entry): Response {
         val raftMachine = requireNotNull(_raftMachines[id]) {
             "Node $id not found"
         }
@@ -74,7 +75,8 @@ class RaftClusterTestNetwork(
         if (raftMachine != null){
             _raftMachines[name] = raftMachine
         }
-        return _peers.computeIfAbsent(name) { InMemoryRaftClusterNode(name, this) }.also {
+        val node = RaftRpc.ClusterNode(name, "localhost", 0)
+        return _peers.computeIfAbsent(name) { InMemoryRaftClusterNode(node, this) }.also {
             logger.info(entry("create_node", "node" to name))
         }
     }
