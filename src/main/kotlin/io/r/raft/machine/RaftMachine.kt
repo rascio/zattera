@@ -111,6 +111,8 @@ class RaftMachine(
                         }
                     }
                 }
+            } catch (t: Throwable) {
+                logger.error(entry("RaftMachine_Error", "error" to t.message), t)
             } finally {
                 _role.value.onExit()
             }

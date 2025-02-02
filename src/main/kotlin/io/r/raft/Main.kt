@@ -61,26 +61,57 @@ class RestRaftServer : Callable<String> {
 
     private val logger = LogManager.getLogger(RestRaftServer::class.java)
 
-    @Parameters(index = "0", description = ["The id of the node"])
+    @Parameters(
+        index = "0",
+        description = ["The id of the node"]
+    )
     private lateinit var id: String
 
-    @Option(names = ["--port"], description = ["The port of the server"])
+    @Option(
+        names = ["--port"],
+        description = ["The port of the server"]
+    )
     private var port: Int = -1
 
-    @Option(names = ["--peer"], description = ["The list of peers, example value: N1=localhost:8081"])
+    @Option(
+        names = ["--peer"],
+        description = ["The list of peers, example value: N1=localhost:8081"]
+    )
     private var peers: List<String> = emptyList()
 
-    @Option(names = ["--election-timeout"], description = ["The election timeout"])
+    @Option(
+        names = ["--election-timeout"],
+        description = ["The election timeout"]
+    )
     private var leaderTimeout: Long = 500
 
-    @Option(names = ["--heartbeat-timeout"], description = ["The heartbeat timeout"])
+    @Option(
+        names = ["--heartbeat-timeout"],
+        description = ["The heartbeat timeout"]
+    )
     private var heartbeatTimeout: Long = 150
 
-    @Option(names = ["--election-jitter"], description = ["The leader jitter"], required = false)
+    @Option(
+        names = ["--election-jitter"],
+        description = ["The leader jitter"],
+        required = false
+    )
     private var leaderJitter: Long = 100
 
-    @Option(names = ["--debug-messages"], description = ["Enable debug logs"], required = false)
+    @Option(
+        names = ["--debug-messages"],
+        description = ["Enable debug logs"],
+        required = false
+    )
     private var debugMessages: Boolean = false
+
+    @Option(
+        names = ["--state-machine"],
+        description = ["The fully qualified name of the state machine"],
+        defaultValue = "io.r.raft.SimpleCounter",
+        required = false
+    )
+    private var stateMachine: String = SimpleCounter::class.qualifiedName!!
 
     override fun call(): String {
         logger.info(entry("Starting server", "id" to id, "port" to port))
@@ -182,18 +213,7 @@ class RestRaftServer : Callable<String> {
                 ),
                 cluster = raftCluster,
                 log = raftLog,
-                stateMachine = object : StateMachine {
-
-                    val lastApplied = AtomicLong()
-
-                    override suspend fun apply(command: LogEntry): ByteArray {
-                        // Do nothing for now
-                        logger.info(entry("Applied", "command" to command.entry.describe()))
-                        return "ADDED_${lastApplied.incrementAndGet()}"
-                            .encodeToByteArray()
-                    }
-
-                },
+                stateMachine = newStateMachine(),
                 scope = coroutineScope
             ).apply {
                 start()
@@ -201,6 +221,31 @@ class RestRaftServer : Callable<String> {
         },
         release = { it, _ -> it.stop() }
     )
+
+    private fun newStateMachine() : StateMachine {
+        val clazz = Class.forName(stateMachine)
+        require(StateMachine::class.java.isAssignableFrom(clazz)) {
+            "State machine must implement the StateMachine interface"
+        }
+        val constructor = clazz.getConstructor()
+        return constructor.newInstance() as StateMachine
+    }
+}
+
+class SimpleCounter : StateMachine{
+
+    private val lastApplied = AtomicLong()
+
+    override suspend fun apply(command: LogEntry): ByteArray {
+        // Do nothing for now
+        logger.info(entry("Applied", "command" to command.entry.describe()))
+        return "ADDED_${lastApplied.incrementAndGet()}"
+            .encodeToByteArray()
+    }
+
+    companion object {
+        private val logger = LogManager.getLogger(SimpleCounter::class.java)
+    }
 }
 
 /**

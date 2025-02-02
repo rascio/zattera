@@ -10,6 +10,8 @@ Usage: start_node.sh -id <node_id> -cluster-size <cluster_size> [-debug] [-store
     use it to enable debug messages and use slower timeouts, eg. --election-timeout=5000 --heartbeat-timeout=1000 --election-jitter=500
   -store-log: enable log persistence
     store logs in the .logs directory
+  -kv: enable key-value store
+    enable key-value store
   -help: show this help message
 "
 while [[ $# -gt 0 ]]
@@ -32,6 +34,10 @@ do
       ;;
     -store-log)
       store_log=true
+      shift
+      ;;
+    -kv)
+      kv=true
       shift
       ;;
     -help)
@@ -59,6 +65,12 @@ for i in $(seq 1 $cluster_size); do
 done
 
 program_args="N$node --port $port $peers $timeout_params"
+
+#if key-value store is enabled, add the --state-machine argument
+if [ "$kv" = true ]; then
+  program_args="$program_args --state-machine io.r.kv.StringsKeyValueStore"
+fi
+
 
 echo "Starting node $node on port $port"
 
