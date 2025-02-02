@@ -37,15 +37,7 @@ class RaftCluster(
         node.send(RaftMessage(from = id, to = to, rpc = rpc))
     }
 
-    suspend fun forward(to: NodeId, entry: LogEntry.Entry): Result<ByteArray> {
-        val node = getNode(to)
-        if (debugMessages) {
-            httpMessagesLogger.info("$id -- $entry --> $to")
-        }
-        return node.forward(entry)
-    }
-
-    private fun getNode(nodeId: NodeId): RaftService {
+    fun getNode(nodeId: NodeId): RaftService {
         return _peers[nodeId] ?: error("Unknown node $nodeId")
     }
 

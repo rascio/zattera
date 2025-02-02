@@ -17,6 +17,7 @@ import io.r.raft.protocol.LogEntry
 import io.r.raft.protocol.RaftMessage
 import io.r.raft.protocol.RaftRpc
 import kotlinx.serialization.decodeFromString
+import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import org.apache.logging.log4j.LogManager
 import org.apache.logging.log4j.Logger
@@ -53,8 +54,10 @@ class HttpRaftController(
                 httpMessagesLogger.info("${raftMachine.id} <-- $payload -- ${raftMachine.id}")
             }
             val res = raftMachine.request(payload)
-
-            call.respondBytes(res, status = HttpStatusCode.OK)
+            call.respondText(
+                text = Json.encodeToString(res),
+                status = HttpStatusCode.OK
+            )
         }
     }
 

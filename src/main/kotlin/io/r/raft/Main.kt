@@ -13,7 +13,6 @@ import io.ktor.server.netty.Netty
 import io.ktor.server.plugins.cors.routing.CORS
 import io.ktor.server.plugins.statuspages.StatusPages
 import io.ktor.server.request.receive
-import io.ktor.server.response.respondBytes
 import io.ktor.server.response.respondText
 import io.ktor.server.routing.get
 import io.ktor.server.routing.post
@@ -24,14 +23,17 @@ import io.r.raft.log.inmemory.InMemoryRaftLog
 import io.r.raft.machine.RaftMachine
 import io.r.raft.protocol.LogEntry
 import io.r.raft.protocol.RaftRpc
+import io.r.raft.protocol.toClusterNode
 import io.r.raft.transport.RaftCluster
-import io.r.raft.transport.ktor.HttpRaftController
 import io.r.raft.transport.ktor.HttpRaftCluster
+import io.r.raft.transport.ktor.HttpRaftController
 import io.r.utils.logs.entry
 import kotlinx.coroutines.CoroutineName
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.runBlocking
+import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.Json
 import org.apache.logging.log4j.LogManager
 import picocli.CommandLine
 import picocli.CommandLine.Command
@@ -188,7 +190,8 @@ class RestRaftServer : Callable<String> {
                 post {
                     val entry = call.receive<ByteArray>()
                     val result = raft.request(LogEntry.ClientCommand(entry))
-                    call.respondBytes(result)
+                    val response = Json.encodeToString(result)
+                    call.respondText(response)
                 }
                 get {
                     raftLog.getEntries(0, Int.MAX_VALUE)
@@ -246,16 +249,6 @@ class SimpleCounter : StateMachine{
     companion object {
         private val logger = LogManager.getLogger(SimpleCounter::class.java)
     }
-}
-
-/**
- * Transform a string with the pattern "NodeId=localhost:8082" into a [RaftRpc.ClusterNode]
- */
-private fun String.toClusterNode(): RaftRpc.ClusterNode {
-    val (id, address) = split("=")
-    val (host, port) = address.split(":")
-    return RaftRpc.ClusterNode(id, host, port.toInt())
-
 }
 
 private fun LogEntry.Entry.describe() = when (this) {

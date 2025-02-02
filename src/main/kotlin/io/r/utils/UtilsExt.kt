@@ -9,3 +9,4 @@ fun LogEntry.Entry.decodeToString() = when (this) {
     is LogEntry.ConfigurationChange -> toString()
     else -> error("Not managed: $this")
 }
+
