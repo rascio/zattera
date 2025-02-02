@@ -60,7 +60,6 @@ class Leader(
                         launch {
                             startHeartBeat(it.node)
                         }
-                        logger.info("Connected ${it.node} => ${cluster.peers}")
                     }
                 }
             }
@@ -186,7 +185,7 @@ class Leader(
     }
 
     private suspend fun CoroutineScope.startHeartBeat(peer: NodeId) {
-        logger.debug(entry("Starting_Heartbeat", "peer" to peer))
+        logger.debug { entry("Starting_Heartbeat", "peer" to peer) }
         while (isActive) {
             val now = System.currentTimeMillis()
             val lastPeerContactedTime = peers[peer]?.lastContactTime ?: Long.MIN_VALUE

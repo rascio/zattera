@@ -52,13 +52,14 @@ class RaftClusterTestNetwork(
             }
         }
     }
-    suspend fun forward(id: NodeId, entry: LogEntry.Entry) {
+    suspend fun forward(id: NodeId, entry: LogEntry.Entry): ByteArray {
         val raftMachine = requireNotNull(_raftMachines[id]) {
             "Node $id not found"
         }
-        when {
+        return when {
             id in isolatedNodes -> {
                 logger.info(entry("isolated_node", "node" to id, "entry" to entry))
+                error("Node $id is isolated")
             }
 
             else -> {

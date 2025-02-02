@@ -45,7 +45,7 @@ class RaftMachine(
      */
     private class IncomingRequest(
         val entry: LogEntry.Entry,
-        val response: CompletableDeferred<Any>,
+        val response: CompletableDeferred<ByteArray>,
         val id: String = UUID.randomUUID().toString()
     )
 
@@ -68,7 +68,7 @@ class RaftMachine(
     /*
      * This map is used to keep track of the client requests that are waiting for commit
      */
-    private val waitingForCommit = ConcurrentHashMap<String, CompletableDeferred<Any>>()
+    private val waitingForCommit = ConcurrentHashMap<String, CompletableDeferred<ByteArray>>()
 
     val id get() = cluster.id
     val serverState get() = _role.value.serverState
@@ -122,7 +122,7 @@ class RaftMachine(
         input.send(message)
     }
 
-    suspend fun request(e: LogEntry.Entry): Any =
+    suspend fun request(e: LogEntry.Entry): ByteArray =
         when (val leader = serverState.leader) {
             id -> {
                 val entry = IncomingRequest(
@@ -144,7 +144,7 @@ class RaftMachine(
             }
 
             null -> error("Unknown leader [$id]")
-            else -> cluster.forward(leader, e)
+            else -> cluster.forward(leader, e).getOrThrow()
         }
 
     private suspend fun handleClientRequest(request: IncomingRequest) {
@@ -181,13 +181,13 @@ class RaftMachine(
         }
     }
 
-    private fun releaseCommit(entry: LogEntry, result: Any) {
+    private fun releaseCommit(entry: LogEntry, result: ByteArray) {
         waitingForCommit.remove(entry.id)?.apply {
             logger.debug {
                 entry(
                     "Releasing_Commit",
                     "entry" to entry.id,
-                    "result" to result
+                    "result" to result.decodeToString()
                 )
             }
             complete(result)
@@ -213,10 +213,12 @@ class RaftMachine(
                     )
                 }
                 val result = when (it.entry) {
-                    is LogEntry.ClientCommand -> stateMachine.apply(it)
+                    is LogEntry.ClientCommand -> stateMachine.apply(it).also { b ->
+                        logger.info(entry("Applied", "command" to b.decodeToString()))
+                    }
                     is LogEntry.ConfigurationChange -> {
                         cluster.changeConfiguration(it.entry)
-                        "ConfigurationChanged"
+                        "true".encodeToByteArray()
                     }
                 }
                 serverState.lastApplied++

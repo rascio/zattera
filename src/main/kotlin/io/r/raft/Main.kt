@@ -11,7 +11,9 @@ import io.ktor.server.application.install
 import io.ktor.server.engine.embeddedServer
 import io.ktor.server.netty.Netty
 import io.ktor.server.plugins.cors.routing.CORS
+import io.ktor.server.plugins.statuspages.StatusPages
 import io.ktor.server.request.receive
+import io.ktor.server.response.respondBytes
 import io.ktor.server.response.respondText
 import io.ktor.server.routing.get
 import io.ktor.server.routing.post
@@ -127,6 +129,14 @@ class RestRaftServer : Callable<String> {
                 install(CORS) {
                     anyHost()
                 }
+                install(StatusPages) {
+                    exception<Throwable> { call, cause ->
+                        call.respondText(
+                            text = "Error: ${cause.message}",
+                            status = HttpStatusCode.InternalServerError
+                        )
+                    }
+                }
                 installRoutes(raftClusterNode, raftMachine, raftLog)
             }
         },
@@ -146,16 +156,8 @@ class RestRaftServer : Callable<String> {
             route("/entries") {
                 post {
                     val entry = call.receive<ByteArray>()
-                    runCatching {
-                        raft.request(LogEntry.ClientCommand(entry))
-                    }.onSuccess {
-                        call.respondText(it.toString())
-                    }.onFailure {
-                        call.respondText(
-                            text = "Error: ${it.message}",
-                            status = HttpStatusCode.InternalServerError
-                        )
-                    }
+                    val result = raft.request(LogEntry.ClientCommand(entry))
+                    call.respondBytes(result)
                 }
                 get {
                     raftLog.getEntries(0, Int.MAX_VALUE)
@@ -184,10 +186,11 @@ class RestRaftServer : Callable<String> {
 
                     val lastApplied = AtomicLong()
 
-                    override suspend fun apply(command: LogEntry) {
+                    override suspend fun apply(command: LogEntry): ByteArray {
                         // Do nothing for now
                         logger.info(entry("Applied", "command" to command.entry.describe()))
-                        lastApplied.incrementAndGet()
+                        return "ADDED_${lastApplied.incrementAndGet()}"
+                            .encodeToByteArray()
                     }
 
                 },

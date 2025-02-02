@@ -7,7 +7,6 @@ import io.r.raft.log.inmemory.InMemoryRaftLog
 import io.r.raft.protocol.LogEntry
 import io.r.raft.protocol.LogEntryMetadata
 import io.r.raft.protocol.NodeId
-import io.r.raft.protocol.RaftMessage
 import io.r.raft.protocol.RaftRole
 import io.r.raft.transport.RaftCluster
 import io.r.raft.transport.inmemory.RaftClusterTestNetwork
@@ -75,10 +74,6 @@ class RaftTestNode private constructor(
         return _log.getMetadata(_log.getLastIndex())!!
     }
 
-    suspend fun send(message: RaftMessage) {
-        raftCluster.send(message.to, message.rpc)
-    }
-
     fun start() {
         raftMachine.start()
     }
@@ -102,10 +97,10 @@ class RaftTestNode private constructor(
         cluster = raftCluster,
         stateMachine = object : StateMachine {
             var applied = 0L
-            override suspend fun apply(command: LogEntry) {
+            override suspend fun apply(command: LogEntry): ByteArray {
                 logger.info(entry("apply", "command" to command.entry.decodeToString(), "_node" to id))
                 delay(stateMachineApplyDelayMs)
-                applied++
+                return "APPLIED_${applied++}".encodeToByteArray()
             }
 
         },

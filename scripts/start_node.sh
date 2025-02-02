@@ -1,13 +1,17 @@
 #!/bin/bash
 
-#-id parameter: node number as an argument
-#   use it to set the port, eg. N1 -> 8081, N2 -> 8082, etc.
-#-cluster-size parameter: core cluster size
-#   use it to set the peers, eg. N1 -> N2, N3, N4, etc.
-#-debug parameter: enable debug messages
-#   use it to enable debug messages, eg. --debug-messages and use slower timeouts, eg. --election-timeout=5000 --heartbeat-timeout=1000 --election-jitter=500
-
-#read input parameters shifting arguments
+help_message="
+Usage: start_node.sh -id <node_id> -cluster-size <cluster_size> [-debug] [-store-log]
+  -id: node number as an argument
+    use it to pick the id and set the port, eg. N1 -> 8081, N2 -> 8082, etc.
+  -cluster-size: core cluster size
+    use it to set the peers, eg. N1, N2, N3, N4, etc.
+  -debug: enable debug messages
+    use it to enable debug messages and use slower timeouts, eg. --election-timeout=5000 --heartbeat-timeout=1000 --election-jitter=500
+  -store-log: enable log persistence
+    store logs in the .logs directory
+  -help: show this help message
+"
 while [[ $# -gt 0 ]]
 do
   key="$1"
@@ -26,8 +30,12 @@ do
       debug=true
       shift
       ;;
+    -store-log)
+      store_log=true
+      shift
+      ;;
     -help)
-      echo "Usage: start_node.sh -id <node_id> -cluster-size <cluster_size> [-debug]"
+      echo "$help_message"
       exit 0
       ;;
     *)
@@ -50,8 +58,15 @@ for i in $(seq 1 $cluster_size); do
     peers="$peers --peer N$i=localhost:$((8080 + $i))"
 done
 
+program_args="N$node --port $port $peers $timeout_params"
+
 echo "Starting node $node on port $port"
 
-mvn -q -Dstyle.color=always process-resources exec:java -Dexec.mainClass=io.r.raft.MainKt \
-  -Dexec.args="N$node --port $port $peers $timeout_params" \
-  | tee >(sed 's/\x1b\[[0-9;]*m//g' > .logs/N$node.log)
+#launch the maven command with tee if store_log is enabled
+if [ "$store_log" = true ]; then
+  mvn -q process-resources exec:java \
+  -Dexec.mainClass=io.r.raft.MainKt -Dexec.args="$program_args" | tee ".logs/N$node.log"
+else
+  mvn -q -Dstyle.color=always process-resources exec:java \
+  -Dexec.mainClass=io.r.raft.MainKt -Dexec.args="$program_args"
+fi

@@ -37,7 +37,7 @@ class RaftCluster(
         node.send(RaftMessage(from = id, to = to, rpc = rpc))
     }
 
-    suspend fun forward(to: NodeId, entry: LogEntry.Entry): Any {
+    suspend fun forward(to: NodeId, entry: LogEntry.Entry): Result<ByteArray> {
         val node = getNode(to)
         if (debugMessages) {
             httpMessagesLogger.info("$id -- $entry --> $to")

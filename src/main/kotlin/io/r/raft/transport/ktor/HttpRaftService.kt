@@ -61,7 +61,7 @@ class HttpRaftService(
         }
     }
 
-    override suspend fun forward(entry: LogEntry.Entry) {
+    override suspend fun forward(entry: LogEntry.Entry): Result<ByteArray> =
         runCatching {
             val response = client.post("http://${node.host}:${node.port}/raft/request") {
                 contentType(ContentType.Application.Json)
@@ -72,14 +72,13 @@ class HttpRaftService(
             } else {
                 connected = true
             }
-            response.readBytes().decodeToString()
+            response.readBytes()
         }.onFailure { e ->
             if (connected) {
                 logger.warn(entry("error_forwarding", "to" to node.id, "entry" to entry, "error" to e.message))
                 connected = false
             }
         }
-    }
 
     override fun close() {
         client.close()

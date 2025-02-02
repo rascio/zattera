@@ -9,5 +9,5 @@ interface RaftService {
     suspend fun send(message: RaftMessage)
 
     // Client
-    suspend fun forward(entry: LogEntry.Entry): Any
+    suspend fun forward(entry: LogEntry.Entry): Result<ByteArray>
 }

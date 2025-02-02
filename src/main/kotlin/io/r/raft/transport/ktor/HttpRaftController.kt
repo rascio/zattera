@@ -3,8 +3,12 @@ package io.r.raft.transport.ktor
 import io.ktor.http.HttpStatusCode
 import io.ktor.server.application.ApplicationCall
 import io.ktor.server.application.call
+import io.ktor.server.application.install
+import io.ktor.server.plugins.statuspages.StatusPages
 import io.ktor.server.request.receiveText
 import io.ktor.server.response.respond
+import io.ktor.server.response.respondBytes
+import io.ktor.server.response.respondText
 import io.ktor.server.routing.Route
 import io.ktor.server.routing.post
 import io.ktor.util.pipeline.PipelineContext
@@ -24,44 +28,33 @@ class HttpRaftController(
 
     val endpoints: Route.() -> Unit = {
         val json = Json
+
         post("/{nodeId}/rpc") {
-            runOrFail(HttpStatusCode.Accepted) {
-                val nodeId = call.parameters["nodeId"]!!
-                val body = call.receiveText()
-                val payload = json.decodeFromString(RaftRpc.serializer(), body)
-                if (debugMessages) {
-                    httpMessagesLogger.info("${raftMachine.id} <== ${payload.describe()} == $nodeId")
-                }
-                raftMachine.handle(
-                    RaftMessage(
-                        from = nodeId,
-                        to = raftMachine.id,
-                        rpc = payload
-                    )
-                )
-                "OK"
+            val nodeId = call.parameters["nodeId"]!!
+            val body = call.receiveText()
+            val payload = json.decodeFromString(RaftRpc.serializer(), body)
+            if (debugMessages) {
+                httpMessagesLogger.info("${raftMachine.id} <== ${payload.describe()} == $nodeId")
             }
+            raftMachine.handle(
+                RaftMessage(
+                    from = nodeId,
+                    to = raftMachine.id,
+                    rpc = payload
+                )
+            )
+            call.respondText("OK", status = HttpStatusCode.Accepted)
+
         }
         post("/request") {
-            runOrFail(HttpStatusCode.OK) {
-                val body = call.receiveText()
-                val payload = json.decodeFromString<LogEntry.Entry>(body)
-                if (debugMessages) {
-                    httpMessagesLogger.info("${raftMachine.id} <-- $payload -- ${raftMachine.id}")
-                }
-                raftMachine.request(payload)
-                "OK2"
+            val body = call.receiveText()
+            val payload = json.decodeFromString<LogEntry.Entry>(body)
+            if (debugMessages) {
+                httpMessagesLogger.info("${raftMachine.id} <-- $payload -- ${raftMachine.id}")
             }
-        }
-    }
+            val res = raftMachine.request(payload)
 
-    private suspend inline fun PipelineContext<*, ApplicationCall>.runOrFail(status: HttpStatusCode, block: () -> Any) {
-        try {
-            val res = block()
-            call.respond(status, res)
-        } catch (e: Exception) {
-            e.printStackTrace()
-            call.respond(HttpStatusCode.InternalServerError, e.message ?: "Internal server error")
+            call.respondBytes(res, status = HttpStatusCode.OK)
         }
     }
 

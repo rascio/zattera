@@ -22,8 +22,8 @@ class InMemoryRaftClusterNode(
         network.send(message)
     }
 
-    override suspend fun forward(entry: LogEntry.Entry): Any {
-        return network.forward(id, entry)
+    override suspend fun forward(entry: LogEntry.Entry): Result<ByteArray> = runCatching {
+        network.forward(id, entry)
     }
 
     companion object {
