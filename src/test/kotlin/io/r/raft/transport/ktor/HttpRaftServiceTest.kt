@@ -1,6 +1,8 @@
 package io.r.raft.transport.ktor
 
 import io.kotest.core.spec.style.FunSpec
+import io.ktor.client.HttpClient
+import io.ktor.client.engine.cio.CIO
 import io.ktor.server.application.install
 import io.ktor.server.engine.embeddedServer
 import io.ktor.server.netty.Netty
@@ -33,11 +35,10 @@ class HttpRaftServiceTest : FunSpec({
             route("/raft", httpLocal.endpoints)
         }
     }
-    beforeSpec {
-        server.start()
-
-    }
+    beforeSpec { server.start() }
     afterSpec { server.stop() }
+
+    val client = autoClose(HttpClient(CIO))
 
     context("HTTP implementation") {
 
@@ -47,7 +48,7 @@ class HttpRaftServiceTest : FunSpec({
             host = "localhost",
             port = port
         )
-        val httpRemote = HttpRemoteRaftService(node)
+        val httpRemote = HttpRemoteRaftService(node, client)
 
         test("Test can send RPC") {
 

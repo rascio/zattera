@@ -27,7 +27,7 @@ class Leader(
     override val serverState: ServerState,
     override val log: RaftLog,
     override val cluster: RaftCluster,
-    override val changeRole: suspend (RaftRole) -> Role,
+    override val transitionTo: suspend (RaftRole) -> Role,
     private val scope: CoroutineScope,
     private val configuration: RaftMachine.Configuration,
     private val peers: MutableMap<NodeId, PeerState> = mutableMapOf()
@@ -59,6 +59,7 @@ class Leader(
                                 PeerState(lastIndex + 1, 0)
                             }
                             startHeartBeat(it.node)
+                            logger.info("Connected ${it.node} => ${cluster.peers}")
                         }
                     }
             }

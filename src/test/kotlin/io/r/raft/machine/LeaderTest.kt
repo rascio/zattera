@@ -4,9 +4,7 @@ import arrow.fx.coroutines.ResourceScope
 import arrow.fx.coroutines.resourceScope
 import io.kotest.common.ExperimentalKotest
 import io.kotest.core.spec.style.FunSpec
-import io.kotest.matchers.should
 import io.kotest.matchers.shouldBe
-import io.kotest.matchers.types.beOfType
 import io.r.raft.log.RaftLog.Companion.getLastMetadata
 import io.r.raft.log.inmemory.InMemoryRaftLog
 import io.r.raft.protocol.LogEntry
@@ -18,7 +16,6 @@ import io.r.raft.test.RaftLogBuilderScope.Companion.raftLog
 import io.r.raft.test.failOnTimeout
 import io.r.raft.test.installCoroutine
 import io.r.raft.transport.RaftCluster
-import io.r.raft.transport.inmemory.InMemoryRaftClusterNode.Companion.sendTo
 import io.r.raft.transport.inmemory.InMemoryRaftClusterNode.Companion.shouldReceive
 import io.r.raft.transport.inmemory.installRaftClusterNetwork
 import kotlinx.coroutines.CoroutineScope
@@ -476,7 +473,7 @@ class LeaderTest : FunSpec({
                     serverState = serverState ?: ServerState(commitIndex = log.getLastIndex(), lastApplied = 0),
                     log = log,
                     cluster = raftCluster,
-                    changeRole = changeRoleFn,
+                    transitionTo = changeRoleFn,
                     scope = scope,
                     configuration = RaftMachine.Configuration(
                         heartbeatTimeoutMs = heartbeatTimeoutMs

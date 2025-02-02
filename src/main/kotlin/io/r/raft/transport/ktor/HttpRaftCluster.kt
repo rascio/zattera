@@ -1,5 +1,8 @@
 package io.r.raft.transport.ktor
 
+import io.ktor.client.HttpClient
+import io.ktor.client.engine.cio.CIO
+import io.ktor.client.plugins.HttpTimeout
 import io.r.raft.protocol.NodeId
 import io.r.raft.protocol.RaftRpc
 import io.r.raft.transport.RaftCluster
@@ -8,6 +11,14 @@ import org.apache.logging.log4j.LogManager
 import org.apache.logging.log4j.Logger
 
 class HttpRaftCluster : RaftCluster.RaftPeers, AutoCloseable {
+
+    private val client = HttpClient(CIO) {
+        install(HttpTimeout) {
+            connectTimeoutMillis = 1000
+            socketTimeoutMillis = 500
+            requestTimeoutMillis = 1000
+        }
+    }
 
     private val peers = mutableMapOf<NodeId, HttpRemoteRaftService>()
 
@@ -20,7 +31,7 @@ class HttpRaftCluster : RaftCluster.RaftPeers, AutoCloseable {
         peers[nodeId]
 
     override suspend fun connect(node: RaftRpc.ClusterNode) {
-        peers.computeIfAbsent(node.id) { HttpRemoteRaftService(node) }
+        peers.computeIfAbsent(node.id) { HttpRemoteRaftService(node, client) }
     }
 
     override suspend fun disconnect(node: RaftRpc.ClusterNode) {

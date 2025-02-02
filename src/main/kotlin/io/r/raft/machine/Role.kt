@@ -19,7 +19,7 @@ sealed class Role {
 
     protected abstract val log: RaftLog
     protected abstract val cluster: RaftCluster
-    protected abstract val changeRole: RoleTransition
+    protected abstract val transitionTo: RoleTransition
 
     open suspend fun onEnter() { }
     open suspend fun onExit() { }

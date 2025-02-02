@@ -18,7 +18,7 @@ class Follower(
     val configuration: RaftMachine.Configuration,
     override val log: RaftLog,
     override val cluster: RaftCluster,
-    override val changeRole: RoleTransition
+    override val transitionTo: RoleTransition
 ) : Role() {
 
     override val timeout: Long = configuration.leaderElectionTimeoutMs + Random.nextLong(configuration.leaderElectionTimeoutJitterMs)
@@ -85,7 +85,7 @@ class Follower(
     }
 
     override suspend fun onTimeout() {
-        changeRole(RaftRole.CANDIDATE)
+        transitionTo(RaftRole.CANDIDATE)
     }
 
     companion object {

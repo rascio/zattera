@@ -1,10 +1,11 @@
 package io.r.raft.machine
 
 import arrow.fx.coroutines.ResourceScope
+import io.r.raft.protocol.LogEntry
 import io.r.raft.protocol.NodeId
-import io.r.raft.transport.inmemory.RaftClusterInMemoryNetwork
-import io.r.utils.awaitility.untilNotNull
+import io.r.raft.transport.inmemory.RaftClusterTestNetwork
 import io.r.utils.awaitility.atMost
+import io.r.utils.awaitility.untilNotNull
 import io.r.utils.logs.entry
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -17,7 +18,9 @@ import org.apache.logging.log4j.Logger
 import kotlin.time.Duration
 import kotlin.time.Duration.Companion.seconds
 
-class RaftTestCluster(val nodes: List<RaftTestNode>) {
+class RaftTestCluster(nodes: List<RaftTestNode>) {
+
+    val nodes = mutableListOf(*nodes.toTypedArray())
 
     private val logger: Logger = LogManager.getLogger(RaftTestCluster::class.java)
 
@@ -27,8 +30,8 @@ class RaftTestCluster(val nodes: List<RaftTestNode>) {
             .let { leader ->
                 try {
                     withTimeoutOrNull(1000) {
-                        leader.raftMachine.command(commands.map { it.encodeToByteArray() })
-                            .join()
+                        commands.map { LogEntry.ClientCommand(it.encodeToByteArray()) }
+                            .forEach { leader.raftMachine.request(it) }
                     }
                 } catch (e: Exception) {
                     when (e.message) {
@@ -37,10 +40,20 @@ class RaftTestCluster(val nodes: List<RaftTestNode>) {
                         else -> throw e
                     }
                 }
-            } ?: run {
-            delay(30)
-            append(commands)
-        }
+            }
+            ?: run {
+                delay(30)
+                append(commands)
+            }
+    }
+
+    suspend fun ResourceScope.addRaftTestNode(
+        nodeId: NodeId,
+        cluster: RaftClusterTestNetwork,
+        configuration: RaftMachine.Configuration = RaftMachine.Configuration(),
+        start: Boolean = true
+    ) = installRaftTestNode(nodeId, cluster, configuration, start).also {
+        nodes.add(it)
     }
 
     /**
@@ -62,7 +75,7 @@ class RaftTestCluster(val nodes: List<RaftTestNode>) {
     /**
      * Wait until a leader is elected
      */
-    fun awaitFindLeader(timeout: Duration = 3.seconds): RaftTestNode {
+    suspend fun awaitFindLeader(timeout: Duration = 3.seconds): RaftTestNode {
         logger.info("await_find_leader")
         val leader = "await_find_leader" atMost timeout untilNotNull {
             nodes.filter { it.isLeader() }
@@ -74,7 +87,7 @@ class RaftTestCluster(val nodes: List<RaftTestNode>) {
         return leader
     }
 
-    fun awaitDifferentLeaderElected(initialLeader: NodeId, timeout: Duration = 3.seconds): RaftTestNode {
+    suspend fun awaitDifferentLeaderElected(initialLeader: NodeId, timeout: Duration = 3.seconds): RaftTestNode {
         logger.info("waiting_for_leader_change")
         val leader = "await_leader_change" atMost timeout untilNotNull {
             nodes.filter { it.id != initialLeader }
@@ -90,19 +103,19 @@ class RaftTestCluster(val nodes: List<RaftTestNode>) {
 
 suspend fun ResourceScope.installRaftTestCluster(
     scope: CoroutineScope,
-    network: RaftClusterInMemoryNetwork,
+    network: RaftClusterTestNetwork,
     nodeIds: List<NodeId>,
     config: (NodeId) -> RaftMachine.Configuration
 ): RaftTestCluster {
     val nodes = nodeIds.map { id ->
         install({
             RaftTestNode(
-                raftClusterInMemoryNetwork = network,
+                raftClusterTestNetwork = network,
                 nodeId = id,
                 configuration = config(id),
                 scope = scope
             ).apply {
-                network.createNode(id)
+                network.createNode(id, raftMachine)
                 start()
             }
         }) { node, _ -> node.stop() }

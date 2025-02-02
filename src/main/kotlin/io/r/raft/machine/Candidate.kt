@@ -19,7 +19,7 @@ class Candidate(
     val configuration: RaftMachine.Configuration,
     override val log: RaftLog,
     override val cluster: RaftCluster,
-    override val changeRole: suspend (RaftRole) -> Role
+    override val transitionTo: suspend (RaftRole) -> Role
 ) : Role() {
 
     override val timeout: Long = configuration.leaderElectionTimeoutMs + Random.nextLong(configuration.leaderElectionTimeoutJitterMs)
@@ -51,12 +51,17 @@ class Candidate(
                     votesReceived += message.from
                     logger.debug(entry("Received_Vote", "from" to message.from, "votes" to votesReceived.size, "quorum" to floor(cluster.peers.size / 2.0)))
                     if (votesReceived.size >= cluster.quorum) {
-                        changeRole(RaftRole.LEADER)
+                        transitionTo(RaftRole.LEADER)
                     }
                 }
             }
             is RaftRpc.AppendEntries -> {
-                changeRole(RaftRole.FOLLOWER)
+                /*
+                 * .onReceivedMessage(message) may (to check) not be needed
+                 * as the append entries will be re-sent by the leader,
+                 * but we can avoid a round trip by processing it here
+                 */
+                transitionTo(RaftRole.FOLLOWER)
                     .onReceivedMessage(message)
             }
             is RaftRpc.RequestVote -> {
@@ -75,7 +80,7 @@ class Candidate(
     }
 
     override suspend fun onTimeout() {
-        changeRole(RaftRole.CANDIDATE)
+        transitionTo(RaftRole.CANDIDATE)
     }
 
     companion object {

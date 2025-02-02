@@ -7,6 +7,7 @@ import io.kotest.matchers.comparables.shouldBeLessThan
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.shouldNotBe
 import io.kotest.matchers.types.shouldBeInstanceOf
+import io.r.raft.protocol.LogEntry
 import io.r.raft.protocol.LogEntryMetadata
 import io.r.raft.protocol.RaftMessage
 import io.r.raft.protocol.RaftRole
@@ -30,6 +31,8 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.joinAll
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.yield
 import org.apache.logging.log4j.LogManager
 import org.awaitility.Awaitility
 import kotlin.random.Random
@@ -243,8 +246,9 @@ class RaftMachineTest : FunSpec({
                 )
                 val leader = cluster.awaitFindLeader()
                 failOnTimeout("timeout waiting for command to be processed", 400.milliseconds) {
-                    leader.raftMachine.command("Hello World".encodeToByteArray())
-                        .join()
+                    leader.raftMachine.request(
+                        LogEntry.ClientCommand("Hello World".encodeToByteArray())
+                    )
                 }
                 val stored = cluster.nodes
                     .map { it.log.getLastIndex() }
@@ -270,18 +274,18 @@ class RaftMachineTest : FunSpec({
                         )
                     }
                 )
-                // Elect a leader
+                logger.info("Elect_a_leader")
                 val leader = cluster.awaitFindLeader()
                 val firstCmdIndex = leader.commitIndex + 1
 
-                // Append a command to the leader
-                val committed = leader.raftMachine.command("First_entry_for_everyone".encodeToByteArray())
-                assertNotNull(committed).join()
+                logger.info("Append_a_command_to_the_leader")
+                leader.raftMachine
+                    .request(LogEntry.ClientCommand("First_entry_for_everyone".encodeToByteArray()))
 
-                // Disconnect the leader from the cluster
+                logger.info("Disconnect_the_leader_from_the_cluster")
                 leader.disconnect()
 
-                // A new leader should be elected
+                logger.info("A_new_leader_should_be_elected")
                 val newLeader = cluster.awaitDifferentLeaderElected(leader.id)
                 logger.info(
                     entry(
@@ -292,18 +296,26 @@ class RaftMachineTest : FunSpec({
                     )
                 )
 
-                // Append a command to the old leader
-                @Suppress("UNUSED_VARIABLE")
-                val oldLeaderCommitted = leader.raftMachine.command("Entry_to_be_replaced".encodeToByteArray())
-                // And a list of commands to the new leader
-                val newLeaderCommitted = newLeader.raftMachine
-                    .command("New_entry_1".encodeToByteArray(), "New_entry_2".encodeToByteArray())
 
-                "await_old_leader_appended" atMost 3.seconds until {
+                launch {
+                    logger.info("Append_a_command_to_the_old_leader [${leader.id}]")
+                    leader.raftMachine
+                        .request(LogEntry.ClientCommand("Entry_to_be_replaced".encodeToByteArray()))
+                }
+                val newLeaderCommitted = launch {
+                    logger.info("Append a list of commands to the new leader [${newLeader.id}")
+                    newLeader.raftMachine.apply {
+                        request(LogEntry.ClientCommand("New_entry_1".encodeToByteArray()))
+                        request(LogEntry.ClientCommand("New_entry_2".encodeToByteArray()))
+                    }
+                }
+
+                logger.info("Reconnect_the_old_leader")
+                "await_old_leader[${leader.id}]_appended" atMost 3.seconds until {
                     leader.getLastEntryMetadata().index > firstCmdIndex
                 }
 
-                failOnTimeout("new_leader_commit", 3.seconds) {
+                failOnTimeout("new_leader[${newLeader.id}]_commit", 3.seconds) {
                     newLeaderCommitted.join()
                 }
                 logger.info("message_replicated_on_2_out_of_3_nodes")
@@ -401,6 +413,68 @@ class RaftMachineTest : FunSpec({
             }
         }
     }
+    context("Dynamic cluster") {
+        // 'refs' is a map with the id and transport for each node
+        val refs = (1..2).map { "N$it" }
+
+        resourceScope {
+            val scope = installCoroutine()
+            val network = installRaftClusterNetwork()
+            val cluster = installRaftTestCluster(
+                scope = scope,
+                network = network,
+                nodeIds = refs,
+                config = { _ ->
+                    RaftMachine.Configuration(
+                        maxLogEntriesPerAppend = 4,
+                        leaderElectionTimeoutMs = 300L,
+                        leaderElectionTimeoutJitterMs = 200,
+                    )
+                }
+            )
+            assertNotNull(cluster.awaitFindLeader())
+
+            cluster.append("First")
+
+            logger.info("first message appended")
+
+            cluster.awaitLogConvergence()
+
+            test("Adding a new node to the cluster should replicate the logs") {
+
+                val N4 = with(cluster) {
+                    addRaftTestNode(
+                        nodeId = "N4",
+                        cluster = network,
+                        configuration = RaftMachine.Configuration(
+                            maxLogEntriesPerAppend = 4,
+                            leaderElectionTimeoutMs = 300L,
+                            leaderElectionTimeoutJitterMs = 200,
+                        ),
+                        start = false
+                    )
+                }
+                N4.start()
+                withTimeout(5000) {
+                    cluster.awaitLogConvergence()
+                }
+                N4.log.getEntries(0, Int.MAX_VALUE) shouldBe cluster.nodes[0].log.getEntries(0, Int.MAX_VALUE)
+            }
+            test("The new node should allow the cluster to elect a new leader and commit entries") {
+                val initialLeader = cluster.awaitFindLeader()
+                val initialCommit = initialLeader.commitIndex
+                initialLeader.disconnect()
+                val leader = cluster.awaitDifferentLeaderElected(initialLeader.id)
+
+                leader.raftMachine.request(
+                    LogEntry.ClientCommand("Second".encodeToByteArray())
+                )
+                leader.commitIndex shouldBeGreaterThan initialCommit
+                initialLeader.reconnect()
+            }
+        }
+
+    }
 })
 
 private fun CoroutineScope.startClientsSendingBatches(
@@ -417,11 +491,12 @@ private fun CoroutineScope.startClientsSendingBatches(
             repeat(batches) { // batches
                 val batch = messages.asSequence()
                     .take(messagesPerBatch)
-                    .map { it.encodeToByteArray() }
+                    .map { LogEntry.ClientCommand(it.encodeToByteArray()) }
                     .toList()
-                @Suppress("DeferredResultUnused")
                 cluster.awaitFindLeader(5.seconds).apply {
-                    raftMachine.command(batch)
+                    batch.forEach {
+                        raftMachine.request(it)
+                    }
                     delay(40)
                 }
             }

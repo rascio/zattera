@@ -40,7 +40,7 @@ class RaftCluster(
     suspend fun forward(to: NodeId, entry: LogEntry.Entry): Any {
         val node = getNode(to)
         if (debugMessages) {
-            logger.info("$id -- $entry --> $to")
+            httpMessagesLogger.info("$id -- $entry --> $to")
         }
         return node.forward(entry)
     }

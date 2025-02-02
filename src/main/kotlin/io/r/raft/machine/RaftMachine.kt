@@ -12,12 +12,9 @@ import io.r.utils.logs.entry
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineName
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
-import kotlinx.coroutines.async
-import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
@@ -28,6 +25,7 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.selects.onTimeout
 import kotlinx.coroutines.selects.select
+import kotlinx.coroutines.selects.whileSelect
 import org.apache.logging.log4j.LogManager
 import org.apache.logging.log4j.Logger
 import java.util.UUID
@@ -61,7 +59,6 @@ class RaftMachine(
 
     val id get() = cluster.id
     val serverState get() = _role.value.serverState
-    val commitIndex get() = _role.value.serverState.commitIndex
     val role: Flow<RaftRole>
         get() = _role.map {
             when (it) {
@@ -75,7 +72,7 @@ class RaftMachine(
     fun start() {
         logger.info(entry("Starting_RaftMachine", "job" to job))
         job = scope.launch(CoroutineName(cluster.id)) {
-            changeRole(RaftRole.FOLLOWER)
+            transitionTo(RaftRole.FOLLOWER)
             try {
                 while (isActive) {
                     applyCommittedEntries()
@@ -84,7 +81,7 @@ class RaftMachine(
                         input.onReceive { message ->
                             if (message.rpc.term > log.getTerm()) {
                                 log.setTerm(message.rpc.term)
-                                changeRole(RaftRole.FOLLOWER)
+                                transitionTo(RaftRole.FOLLOWER)
                             }
                             _role.value.onReceivedMessage(message)
                         }
@@ -93,7 +90,7 @@ class RaftMachine(
                             _role.value.onTimeout()
                         }
                         incomingRequests.onReceive { command ->
-                            dequeueRequest(command)
+                            handleClientRequest(command)
                         }
                     }
                 }
@@ -106,29 +103,6 @@ class RaftMachine(
 
     suspend fun handle(message: RaftMessage) {
         input.send(message)
-    }
-
-    fun command(vararg command: ByteArray): Deferred<Unit> =
-        command(command.toList())
-
-    fun command(command: List<ByteArray>): Deferred<Unit> {
-        return scope.async {
-            command.map { command(it) }
-                .awaitAll()
-        }
-    }
-
-    suspend fun command(command: ByteArray): Deferred<Any> {
-        val entry = IncomingRequest(LogEntry.ClientCommand(command), CompletableDeferred())
-        incomingRequests.send(entry)
-        logger.info {
-            entry(
-                "command_sent",
-                "id" to entry.id,
-                "command" to command.encodeBase64()
-            )
-        }
-        return entry.response
     }
 
     suspend fun request(e: LogEntry.Entry): Any =
@@ -152,42 +126,52 @@ class RaftMachine(
                 entry.response.await()
             }
 
-            null -> error("Unknown leader")
+            null -> error("Unknown leader [$id]")
             else -> cluster.forward(leader, e)
         }
 
-    private suspend fun dequeueRequest(command: IncomingRequest) {
+    private suspend fun handleClientRequest(request: IncomingRequest) {
         when {
             _role.value is Leader -> {
                 val term = log.getTerm()
                 val entry = LogEntry(
                     term = term,
-                    entry = command.entry,
-                    id = command.id
+                    entry = request.entry,
+                    id = request.id
                 )
                 log.append(log.getLastMetadata(), listOf(entry))
 
-                if (command.entry is LogEntry.ConfigurationChange) {
-                    cluster.changeConfiguration(command.entry)
+                if (request.entry is LogEntry.ConfigurationChange) {
+                    cluster.changeConfiguration(request.entry)
                 }
 
-                // add to waiting queue
-                waitingForCommit[command.id] = command.response
+                // add to queue of requests to respond to
+                waitingForCommit[request.id] = request.response
 
                 scope.launch {
-                    // on timeout, remove and cancel from waiting queue
+                    // cancel the timeout if the command is completed
+                    request.response.invokeOnCompletion { cancel() }
                     delay(configuration.pendingCommandsTimeout)
+                    // on timeout, remove and cancel from waiting queue
                     waitingForCommit.remove(entry.id)
                         ?.cancel("Time out")
                 }
+
             }
 
-            else -> command.response
+            else -> request.response
                 .completeExceptionally(IllegalStateException("Only leader can accept commands"))
         }
     }
 
     private fun releaseCommit(entry: LogEntry, result: Any) {
+        logger.debug {
+            entry(
+                "Releasing_Entry",
+                "entry" to entry.id,
+                "result" to result
+            )
+        }
         waitingForCommit.remove(entry.id)
             ?.complete(result)
     }
@@ -206,6 +190,7 @@ class RaftMachine(
                         "Applying_Committed",
                         "entry" to it.id,
                         "index" to lastApplied + 1,
+                        "commit_index" to serverState.commitIndex,
                         "client_handle" to waitingForCommit.contains(it.id)
                     )
                 }
@@ -231,7 +216,7 @@ class RaftMachine(
         }
     }
 
-    private suspend fun changeRole(newRole: RaftRole): Role {
+    private suspend fun transitionTo(newRole: RaftRole): Role {
         _role.value.onExit()
         _role.value = when (newRole) {
             RaftRole.FOLLOWER -> createFollower()
@@ -258,7 +243,7 @@ class RaftMachine(
         configuration,
         log,
         cluster,
-        ::changeRole
+        ::transitionTo
     )
 
     private fun createCandidate() = Candidate(
@@ -266,14 +251,14 @@ class RaftMachine(
         configuration,
         log,
         cluster,
-        ::changeRole
+        ::transitionTo
     )
 
     private fun createLeader() = Leader(
         _role.value.serverState,
         log,
         cluster,
-        ::changeRole,
+        ::transitionTo,
         scope,
         configuration
     )

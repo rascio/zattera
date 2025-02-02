@@ -35,7 +35,7 @@ class FollowerTest : FunSpec({
                 serverState = ServerState(0L, 0L),
                 log = log,
                 cluster = RaftCluster("UnderTest", network),
-                changeRole = changeRoleFn,
+                transitionTo = changeRoleFn,
                 configuration = RaftMachine.Configuration(
                     leaderElectionTimeoutMs = 1000
                 )

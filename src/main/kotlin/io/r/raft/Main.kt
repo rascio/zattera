@@ -51,7 +51,7 @@ fun main(args: Array<String>) {
         
         Start a Raft server with a REST API.
         Useful endpoints are:
-        - POST /entries on the leader to append a new entry
+        - POST /entries to append a new entry
         - GET /entries to get all entries
     """,
 )
@@ -92,7 +92,7 @@ class RestRaftServer : Callable<String> {
 
     private suspend fun ResourceScope.execute() {
         val raftLog = InMemoryRaftLog()
-//        val raftClusterNode = KtorRestRaftClusterBck(id, peers.map(RestNodeAddress::parse).toSet())
+
         val httpRaftClusterPeers = autoCloseable { HttpRaftCluster() }
         val raftCluster = RaftCluster(id, httpRaftClusterPeers, debugMessages)
 

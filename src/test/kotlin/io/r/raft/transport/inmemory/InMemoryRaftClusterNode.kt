@@ -13,7 +13,7 @@ import io.r.raft.transport.RaftService
 
 class InMemoryRaftClusterNode(
     val id: NodeId,
-    val network: RaftClusterInMemoryNetwork
+    val network: RaftClusterTestNetwork
 ) : RaftService {
 
     val channel get() = network.channel(id)
@@ -23,7 +23,7 @@ class InMemoryRaftClusterNode(
     }
 
     override suspend fun forward(entry: LogEntry.Entry): Any {
-        TODO("Not implemented")
+        return network.forward(id, entry)
     }
 
     companion object {

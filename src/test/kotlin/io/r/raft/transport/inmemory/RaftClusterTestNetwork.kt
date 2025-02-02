@@ -2,6 +2,8 @@ package io.r.raft.transport.inmemory
 
 import arrow.fx.coroutines.ResourceScope
 import arrow.fx.coroutines.autoCloseable
+import io.r.raft.machine.RaftMachine
+import io.r.raft.protocol.LogEntry
 import io.r.raft.protocol.NodeId
 import io.r.raft.protocol.RaftMessage
 import io.r.raft.protocol.RaftRpc
@@ -13,9 +15,9 @@ import org.apache.logging.log4j.LogManager
 import org.apache.logging.log4j.Logger
 
 suspend fun ResourceScope.installRaftClusterNetwork(vararg nodeIds: NodeId) =
-    autoCloseable { RaftClusterInMemoryNetwork(*nodeIds) }
+    autoCloseable { RaftClusterTestNetwork(*nodeIds) }
 
-class RaftClusterInMemoryNetwork(
+class RaftClusterTestNetwork(
     vararg nodeIds: NodeId
 ) : RaftCluster.RaftPeers, AutoCloseable {
     private val isolatedNodes = mutableSetOf<NodeId>()
@@ -23,6 +25,7 @@ class RaftClusterInMemoryNetwork(
         nodeIds.forEach { id -> put(id, Channel(Channel.UNLIMITED)) }
     }
     private val _peers = mutableMapOf<NodeId, InMemoryRaftClusterNode>()
+    private val _raftMachines = mutableMapOf<NodeId, RaftMachine>()
 
     // This method should be private, but it is used in InMemoryRaftClusterNode
     // Procrastination: I will do it later (read: never)
@@ -49,9 +52,27 @@ class RaftClusterInMemoryNetwork(
             }
         }
     }
+    suspend fun forward(id: NodeId, entry: LogEntry.Entry) {
+        val raftMachine = requireNotNull(_raftMachines[id]) {
+            "Node $id not found"
+        }
+        when {
+            id in isolatedNodes -> {
+                logger.info(entry("isolated_node", "node" to id, "entry" to entry))
+            }
 
-    fun createNode(name: NodeId): InMemoryRaftClusterNode {
+            else -> {
+                logger.info("-- $entry --> $id")
+                raftMachine.request(entry)
+            }
+        }
+    }
+
+    fun createNode(name: NodeId, raftMachine: RaftMachine? = null): InMemoryRaftClusterNode {
         channels.computeIfAbsent(name) { Channel(Channel.UNLIMITED) }
+        if (raftMachine != null){
+            _raftMachines[name] = raftMachine
+        }
         return _peers.computeIfAbsent(name) { InMemoryRaftClusterNode(name, this) }.also {
             logger.info(entry("create_node", "node" to name))
         }
@@ -88,6 +109,6 @@ class RaftClusterInMemoryNetwork(
     }
 
     companion object {
-        private val logger: Logger = LogManager.getLogger(RaftClusterInMemoryNetwork::class.java)
+        private val logger: Logger = LogManager.getLogger(RaftClusterTestNetwork::class.java)
     }
 }

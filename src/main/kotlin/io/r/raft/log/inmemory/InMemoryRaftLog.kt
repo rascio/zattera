@@ -24,7 +24,7 @@ class InMemoryRaftLog(
     private val lock = ReadWriteLock()
 
     private val log: NavigableMap<Index, LogEntry> = TreeMap(log).apply {
-        put(0, LogEntry(0, LogEntry.ClientCommand(byteArrayOf())))
+        put(0, ROOT_ENTRY)
     }
     private val term = AtomicRef(term)
     private val votedFor = AtomicRef(votedFor)
@@ -89,5 +89,6 @@ class InMemoryRaftLog(
 
     companion object {
         private val logger: Logger = LogManager.getLogger(InMemoryRaftLog::class.java)
+        private val ROOT_ENTRY = LogEntry(0, LogEntry.ClientCommand(byteArrayOf()))
     }
 }

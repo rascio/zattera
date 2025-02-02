@@ -21,7 +21,7 @@ data class LogEntry(
     val id: String = UUID.randomUUID().toString()
 ) {
 
-    override fun toString(): String = "LogEntry(term=$term, c=${entry})"
+    override fun toString(): String = "LogEntry(id=${id}, term=$term, c=${entry})"
 
     @Serializable
     sealed interface Entry
@@ -29,7 +29,22 @@ data class LogEntry(
     class ClientCommand(
         @Serializable(with = ByteArrayBase64Serializer::class)
         val bytes: ByteArray
-    ) : Entry
+    ) : Entry {
+        override fun equals(other: Any?): Boolean {
+            if (this === other) return true
+            if (other !is ClientCommand) return false
+
+            return bytes.contentEquals(other.bytes)
+        }
+
+        override fun toString(): String {
+            return "ClientCommand(bytes=${bytes.encodeBase64()})"
+        }
+
+        override fun hashCode(): Int {
+            return bytes.contentHashCode()
+        }
+    }
     @Serializable
     data class ConfigurationChange(
         val new: List<RaftRpc.ClusterNode>,
@@ -54,11 +69,12 @@ data class LogEntry(
 }
 
 fun main() {
+    val clientCommand = LogEntry.ClientCommand("Hello, World!".toByteArray())
     val string = Json.encodeToString(
-        LogEntry.ClientCommand("Hello, World!".toByteArray()) as LogEntry.Entry
+        clientCommand as LogEntry.Entry
     )
-    println(
-     string
-    )
-    println(Json.decodeFromString<LogEntry.Entry>(string))
+    println(string)
+    val decoded = Json.decodeFromString<LogEntry.Entry>(string)
+    println(decoded)
+    check(clientCommand == decoded)
 }
