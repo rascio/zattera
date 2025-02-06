@@ -53,7 +53,7 @@ class RaftClusterTestNetwork(
             }
         }
     }
-    suspend fun forward(id: NodeId, entry: LogEntry.Entry): Response {
+    suspend fun command(id: NodeId, entry: LogEntry.Entry): Response {
         val raftMachine = requireNotNull(_raftMachines[id]) {
             "Node $id not found"
         }
@@ -64,8 +64,24 @@ class RaftClusterTestNetwork(
             }
 
             else -> {
-                logger.info("-- $entry --> $id")
-                raftMachine.request(entry)
+                logger.info("-- !$entry --> $id")
+                raftMachine.command(entry)
+            }
+        }
+    }
+    suspend fun query(id: NodeId, query: ByteArray): Response {
+        val raftMachine = requireNotNull(_raftMachines[id]) {
+            "Node $id not found"
+        }
+        return when {
+            id in isolatedNodes -> {
+                logger.info(entry("isolated_node", "node" to id, "query" to query))
+                error("Node $id is isolated")
+            }
+
+            else -> {
+                logger.info("-- ?$query --> $id")
+                raftMachine.query(query)
             }
         }
     }

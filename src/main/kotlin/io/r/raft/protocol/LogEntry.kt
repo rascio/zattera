@@ -4,6 +4,7 @@ import io.ktor.util.decodeBase64Bytes
 import io.r.utils.encodeBase64
 import kotlinx.serialization.KSerializer
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.Transient
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.descriptors.PrimitiveKind
 import kotlinx.serialization.descriptors.PrimitiveSerialDescriptor
@@ -30,6 +31,9 @@ data class LogEntry(
         @Serializable(with = ByteArrayBase64Serializer::class)
         val bytes: ByteArray
     ) : Entry {
+
+        private val hash by lazy { bytes.hashCode() }
+
         override fun equals(other: Any?): Boolean {
             if (this === other) return true
             if (other !is ClientCommand) return false
@@ -38,7 +42,7 @@ data class LogEntry(
         }
 
         override fun toString(): String {
-            return "ClientCommand(bytes=${bytes.encodeBase64()})"
+            return "ClientCommand($hash|${bytes.encodeBase64()})"
         }
 
         override fun hashCode(): Int {

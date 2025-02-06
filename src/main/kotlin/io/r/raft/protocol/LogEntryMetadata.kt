@@ -5,8 +5,8 @@ import kotlinx.serialization.Serializable
 @Serializable
 data class LogEntryMetadata(val index: Index = 0, val term: Term = 0) {
     init {
-        require(index >= 0) { "Index must be greater than or equal to 0" }
-        require(term >= 0) { "Term must be greater than or equal to 0" }
+        require(index >= 0) { "Index must be greater than or equal to 0. $index < 0" }
+        require(term >= 0) { "Term must be greater than or equal to 0. $term < 0" }
     }
     operator fun compareTo(other: LogEntryMetadata): Int {
         return when {

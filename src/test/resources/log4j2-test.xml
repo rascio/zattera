@@ -4,7 +4,7 @@
                xsi:schemaLocation="https://logging.apache.org/xml/ns https://logging.apache.org/xml/ns/log4j-config-2.23.1.xsd">
     <Appenders>
         <Console name="Console" target="SYSTEM_OUT">
-            <PatternLayout pattern="%d{yyyy-MM-dd HH:mm:ss.SSS} %level{INFO=ℹ️,DEBUG=🔧,ERROR=❌,WARN=⚠️} [%5.5t] | %20.20c{1} | %m%n"/>
+            <PatternLayout pattern="%d{yyyy-MM-dd HH:mm:ss.SSS} %level{INFO=ℹ️,DEBUG=🔧,ERROR=❌,WARN=⚠️} [%7.7t] | %10.10c{1} | NodeId=%X{NodeId} %m%n"/>
         </Console>
         <Async name="AsyncConsole">
             <AppenderRef ref="Console"/>

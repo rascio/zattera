@@ -7,6 +7,7 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
+import org.apache.logging.log4j.LogManager
 
 class StringsKeyValueStore : StateMachine {
 
@@ -18,6 +19,12 @@ class StringsKeyValueStore : StateMachine {
             .encodeToByteArray()
     }
 
+    override suspend fun read(query: ByteArray): ByteArray {
+        val request = Json.decodeFromString<Request>(query.decodeToString())
+        return Json.encodeToString(handle(request))
+            .encodeToByteArray()
+    }
+
     private fun handle(request: Request): Response = when (request) {
         is Get -> {
             val value = store[request.key]
@@ -25,7 +32,9 @@ class StringsKeyValueStore : StateMachine {
             else NotFound
         }
         is Set -> {
-            store[request.key] = request.value.resolvePlaceholders()
+            store[request.key] = request.value.resolvePlaceholders().also {
+                logger.info("Set key=${request.key} new=$it old=${store[request.key]} value=${request.value}")
+            }
             Ok
         }
         is Delete -> {
@@ -63,5 +72,6 @@ class StringsKeyValueStore : StateMachine {
 
     companion object {
         val PLACEHOLDER_REGEX = Regex("\\$\\{([^}]+)}")
+        private val logger = LogManager.getLogger(StringsKeyValueStore::class.java)
     }
 }

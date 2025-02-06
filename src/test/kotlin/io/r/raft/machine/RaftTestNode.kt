@@ -42,7 +42,8 @@ class RaftTestNode private constructor(
     private val raftCluster: RaftCluster,
     val configuration: RaftMachine.Configuration,
     private var _log: RaftLog,
-    private val scope: CoroutineScope
+    private val scope: CoroutineScope,
+    stateMachine: StateMachine? = null
 ) {
     companion object {
         private val logger: Logger = LogManager.getLogger(RaftTestNode::class.java)
@@ -50,17 +51,19 @@ class RaftTestNode private constructor(
             raftClusterTestNetwork: RaftClusterTestNetwork,
             nodeId: NodeId,
             configuration: RaftMachine.Configuration,
-            scope: CoroutineScope? = null
+            scope: CoroutineScope? = null,
+            stateMachine: StateMachine? = null
         ) = RaftTestNode(
             raftClusterTestNetwork = raftClusterTestNetwork,
             raftCluster = RaftCluster(nodeId, raftClusterTestNetwork),
             configuration = configuration,
             _log = InMemoryRaftLog(),
-            scope = scope ?: CoroutineScope(Dispatchers.IO)
+            scope = scope ?: CoroutineScope(Dispatchers.IO),
+            stateMachine = stateMachine
         )
     }
     val log get() = _log
-    val raftMachine = newRaftMachine()
+    val raftMachine = newRaftMachine(stateMachine)
     val commitIndex get() = raftMachine.serverState.commitIndex
     val id: NodeId get() = raftCluster.id
     val roleChanges get() = raftMachine.role
@@ -90,12 +93,12 @@ class RaftTestNode private constructor(
         raftClusterTestNetwork.reconnect(id)
     }
 
-    private fun newRaftMachine() = RaftMachine(
+    private fun newRaftMachine(stateMachine: StateMachine?) = RaftMachine(
         input = raftClusterTestNetwork.channel(id),
         configuration = configuration,
         log = _log,
         cluster = raftCluster,
-        stateMachine = object : StateMachine {
+        stateMachine = stateMachine ?: object : StateMachine {
             var applied = 0L
             override suspend fun apply(command: LogEntry): ByteArray {
                 logger.info(entry("apply", "command" to command.entry.decodeToString(), "_node" to id))

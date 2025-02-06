@@ -22,7 +22,6 @@ import io.r.raft.log.StateMachine
 import io.r.raft.log.inmemory.InMemoryRaftLog
 import io.r.raft.machine.RaftMachine
 import io.r.raft.protocol.LogEntry
-import io.r.raft.protocol.RaftRpc
 import io.r.raft.protocol.toClusterNode
 import io.r.raft.transport.RaftCluster
 import io.r.raft.transport.ktor.HttpRaftCluster
@@ -189,7 +188,7 @@ class RestRaftServer : Callable<String> {
             route("/entries") {
                 post {
                     val entry = call.receive<ByteArray>()
-                    val result = raft.request(LogEntry.ClientCommand(entry))
+                    val result = raft.command(LogEntry.ClientCommand(entry))
                     val response = Json.encodeToString(result)
                     call.respondText(response)
                 }

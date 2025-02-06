@@ -1,13 +1,15 @@
 package io.r.raft.machine
 
 import arrow.fx.coroutines.ResourceScope
+import io.r.raft.log.StateMachine
 import io.r.raft.protocol.LogEntry
 import io.r.raft.protocol.NodeId
+import io.r.raft.test.installCoroutine
 import io.r.raft.transport.inmemory.RaftClusterTestNetwork
 import io.r.utils.awaitility.atMost
 import io.r.utils.awaitility.untilNotNull
+import io.r.utils.decodeToString
 import io.r.utils.logs.entry
-import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
@@ -15,6 +17,7 @@ import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import org.apache.logging.log4j.LogManager
 import org.apache.logging.log4j.Logger
+import org.apache.logging.log4j.kotlin.loggingContext
 import kotlin.time.Duration
 import kotlin.time.Duration.Companion.seconds
 
@@ -31,7 +34,7 @@ class RaftTestCluster(nodes: List<RaftTestNode>) {
                 try {
                     withTimeoutOrNull(1000) {
                         commands.map { LogEntry.ClientCommand(it.encodeToByteArray()) }
-                            .forEach { leader.raftMachine.request(it) }
+                            .forEach { leader.raftMachine.command(it) }
                     }
                 } catch (e: Exception) {
                     when (e.message) {
@@ -99,21 +102,33 @@ class RaftTestCluster(nodes: List<RaftTestNode>) {
         logger.info(entry("Leader_changed", "leader" to leader.id))
         return leader
     }
+
+    suspend fun dumpRaftLogs(decode: Boolean = false) {
+        nodes.forEach { node ->
+            node.log.getEntries(1, Int.MAX_VALUE)
+                .joinToString("\n") { if (decode) "${it.id}|${it.term}|${it.entry.decodeToString()}" else it.toString() }
+                .let {
+                    logger.debug("Dump log for node ${node.id}\n$it")
+                }
+        }
+    }
 }
 
 suspend fun ResourceScope.installRaftTestCluster(
-    scope: CoroutineScope,
     network: RaftClusterTestNetwork,
     nodeIds: List<NodeId>,
-    config: (NodeId) -> RaftMachine.Configuration
+    config: (NodeId) -> RaftMachine.Configuration,
+    stateMachineFactory: () -> StateMachine? = { null }
 ): RaftTestCluster {
     val nodes = nodeIds.map { id ->
+        val scope = installCoroutine(loggingContext(mapOf("NodeId" to id)))
         install({
             RaftTestNode(
                 raftClusterTestNetwork = network,
                 nodeId = id,
                 configuration = config(id),
-                scope = scope
+                scope = scope,
+                stateMachine = stateMachineFactory()
             ).apply {
                 network.createNode(id, raftMachine)
                 start()

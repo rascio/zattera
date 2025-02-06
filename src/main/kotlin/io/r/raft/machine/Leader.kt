@@ -1,9 +1,8 @@
 package io.r.raft.machine
 
 import io.r.raft.log.RaftLog
-import io.r.raft.log.RaftLog.Companion.getLastMetadata
+import io.r.raft.machine.RaftMachine.Companion.DIAGNOSTIC_MARKER
 import io.r.raft.protocol.Index
-import io.r.raft.protocol.LogEntry
 import io.r.raft.protocol.LogEntryMetadata
 import io.r.raft.protocol.NodeId
 import io.r.raft.protocol.RaftMessage
@@ -17,10 +16,11 @@ import kotlinx.coroutines.CoroutineName
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.joinAll
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import org.apache.logging.log4j.LogManager
 
 class Leader(
@@ -33,6 +33,7 @@ class Leader(
     private val peers: MutableMap<NodeId, PeerState> = mutableMapOf()
 ) : Role() {
 
+    val heartBeatCompletion = HeartBeatCompletion()
     private var heartbeat: Job? = null
 
     override val timeout: Long = Long.MAX_VALUE // forever
@@ -82,6 +83,7 @@ class Leader(
                 updatePeerMetadata(message.from, message.rpc)
                 // Update commit index, this needs to be done after updating the peer metadata
                 serverState.commitIndex = getQuorum()
+                heartBeatCompletion.increment()
                 getNextBatch(message.from, message.rpc)?.let { (prev, entries) ->
                     cluster.send(
                         message.from,
@@ -198,10 +200,10 @@ class Leader(
     }
 
     private suspend fun NodeId.sendHeartbeat() {
-        val (nextIndex, matchIndex, lastTimeContacted) = peers[this]!!
+        val (nextIndex, matchIndex, lastTimeContacted) = checkNotNull(peers[this]) { "$this is not registered" }
         val entries = log.getEntries(nextIndex, configuration.maxLogEntriesPerAppend)
         val term = log.getTerm()
-        logger.debug {
+        logger.debug(DIAGNOSTIC_MARKER) {
             entry(
                 "Heartbeat",
                 "from" to cluster.id,
@@ -223,6 +225,46 @@ class Leader(
                 leaderCommit = serverState.commitIndex
             )
         )
+    }
+
+    inner class HeartBeatCompletion {
+        private var deferred: CompletableDeferred<Unit>? = null
+        private var count: Int = 0
+        private val mutex = Mutex()
+
+        suspend fun increment() {
+            mutex.withLock {
+                if (deferred != null) {
+                    logger.debug(entry("Heartbeat_Incremented"))
+                    count++
+                    if (count >= cluster.quorum) {
+                        deferred!!.complete(Unit)
+                        deferred = null
+                        count = 0
+                    }
+                }
+            }
+        }
+
+        suspend fun await() {
+            val res = mutex.withLock {
+                deferred ?: run {
+                    val res = CompletableDeferred<Unit>()
+                    deferred = res
+                    count = 1
+                    cluster.peers.forEach { p -> p.sendHeartbeat() }
+//                    val considerNewPeers = cluster.events
+//                        .onEach {
+//                            if (it is RaftCluster.Connected) it.node.sendHeartbeat()
+//                        }
+//                        .launchIn(scope)
+//                    res.invokeOnCompletion { considerNewPeers.cancel() }
+                    res
+                }
+            }
+            logger.debug(entry("Waiting_Heartbeat_Completion"))
+            res.await()
+        }
     }
 
     companion object {

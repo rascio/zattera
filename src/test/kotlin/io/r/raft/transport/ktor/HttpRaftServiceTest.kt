@@ -72,7 +72,7 @@ class HttpRaftServiceTest : FunSpec({
                 )
             )
             httpRemote.request(entry)
-            coVerify(exactly = 1) { raftMachine.request(entry) }
+            coVerify(exactly = 1) { raftMachine.command(entry) }
         }
     }
 
