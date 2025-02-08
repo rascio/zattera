@@ -8,7 +8,7 @@ A bad implementation of a raft consensus algorithm, just for fun.
 ## Testing
 `scripts/` folder contains scripts to start nodes/cluster and clients:
 
-- `start_node.sh`: Starts a node with the given parameters, support a simple server and a KV store
+- `start-node.sh`: Starts a node with the given parameters, support a simple server and a KV store
 - `key-value.sh`: CLI to interact with the KV store
 
 both support `-h` to show the help message.
