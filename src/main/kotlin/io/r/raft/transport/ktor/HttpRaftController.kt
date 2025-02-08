@@ -1,17 +1,11 @@
 package io.r.raft.transport.ktor
 
 import io.ktor.http.HttpStatusCode
-import io.ktor.server.application.ApplicationCall
 import io.ktor.server.application.call
-import io.ktor.server.application.install
-import io.ktor.server.plugins.statuspages.StatusPages
 import io.ktor.server.request.receiveText
-import io.ktor.server.response.respond
-import io.ktor.server.response.respondBytes
 import io.ktor.server.response.respondText
 import io.ktor.server.routing.Route
 import io.ktor.server.routing.post
-import io.ktor.util.pipeline.PipelineContext
 import io.r.raft.machine.RaftMachine
 import io.r.raft.protocol.LogEntry
 import io.r.raft.protocol.RaftMessage
@@ -23,7 +17,7 @@ import org.apache.logging.log4j.LogManager
 import org.apache.logging.log4j.Logger
 
 class HttpRaftController(
-    private val raftMachine: RaftMachine,
+    private val raftMachine: RaftMachine<*>,
     private val debugMessages: Boolean = false
 ) {
 
@@ -51,9 +45,21 @@ class HttpRaftController(
             val body = call.receiveText()
             val payload = json.decodeFromString<LogEntry.Entry>(body)
             if (debugMessages) {
-                httpMessagesLogger.info("${raftMachine.id} <-- $payload -- ${raftMachine.id}")
+                httpMessagesLogger.info("${raftMachine.id} <-- !$payload -- ${raftMachine.id}")
             }
-            val res = raftMachine.request(payload)
+            val res = raftMachine.command(payload)
+            call.respondText(
+                text = Json.encodeToString(res),
+                status = HttpStatusCode.OK
+            )
+        }
+        post("/query") {
+            val payload = call.receiveText()
+                .encodeToByteArray()
+            if (debugMessages) {
+                httpMessagesLogger.info("${raftMachine.id} <-- ?$payload -- ${raftMachine.id}")
+            }
+            val res = raftMachine.query(payload)
             call.respondText(
                 text = Json.encodeToString(res),
                 status = HttpStatusCode.OK

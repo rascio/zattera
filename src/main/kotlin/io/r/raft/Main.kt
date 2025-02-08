@@ -1,3 +1,5 @@
+@file:JacocoExclusionNeedsGenerated
+
 package io.r.raft
 
 import arrow.atomic.AtomicLong
@@ -12,28 +14,26 @@ import io.ktor.server.engine.embeddedServer
 import io.ktor.server.netty.Netty
 import io.ktor.server.plugins.cors.routing.CORS
 import io.ktor.server.plugins.statuspages.StatusPages
-import io.ktor.server.request.receive
 import io.ktor.server.response.respondText
 import io.ktor.server.routing.get
-import io.ktor.server.routing.post
 import io.ktor.server.routing.route
 import io.ktor.server.routing.routing
 import io.r.raft.log.StateMachine
 import io.r.raft.log.inmemory.InMemoryRaftLog
 import io.r.raft.machine.RaftMachine
 import io.r.raft.protocol.LogEntry
-import io.r.raft.protocol.RaftRpc
 import io.r.raft.protocol.toClusterNode
 import io.r.raft.transport.RaftCluster
 import io.r.raft.transport.ktor.HttpRaftCluster
 import io.r.raft.transport.ktor.HttpRaftController
+import io.r.utils.JacocoExclusionNeedsGenerated
 import io.r.utils.logs.entry
 import kotlinx.coroutines.CoroutineName
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.runBlocking
-import kotlinx.serialization.encodeToString
-import kotlinx.serialization.json.Json
+import kotlinx.serialization.KSerializer
+import kotlinx.serialization.Serializable
 import org.apache.logging.log4j.LogManager
 import picocli.CommandLine
 import picocli.CommandLine.Command
@@ -59,6 +59,7 @@ fun main(args: Array<String>) {
         - GET /entries to get all entries
     """,
 )
+@JacocoExclusionNeedsGenerated
 class RestRaftServer : Callable<String> {
 
     private val logger = LogManager.getLogger(RestRaftServer::class.java)
@@ -101,8 +102,8 @@ class RestRaftServer : Callable<String> {
     private var leaderJitter: Long = 100
 
     @Option(
-        names = ["--debug-messages"],
-        description = ["Enable debug logs"],
+        names = ["--debug"],
+        description = ["Enable debug logs, use -DlogLevel=DEBUG for all logs"],
         required = false
     )
     private var debugMessages: Boolean = false
@@ -116,6 +117,9 @@ class RestRaftServer : Callable<String> {
     private var stateMachine: String = SimpleCounter::class.qualifiedName!!
 
     override fun call(): String {
+        if (debugMessages && "logLevel" !in System.getProperties()) {
+            System.setProperty("logLevel", "INFO")
+        }
         logger.info(entry("Starting server", "id" to id, "port" to port))
         runBlocking(Dispatchers.IO + CoroutineName("Server")) {
             resourceScope {
@@ -138,7 +142,6 @@ class RestRaftServer : Callable<String> {
         )
         val http = installHttpServer(
             raftClusterNode = HttpRaftController(raftMachine, debugMessages = debugMessages),
-            raftMachine = raftMachine,
             raftLog = raftLog
         )
         logger.info(entry("Server_started", "id" to id, "port" to port))
@@ -154,7 +157,6 @@ class RestRaftServer : Callable<String> {
 
     private suspend fun ResourceScope.installHttpServer(
         raftClusterNode: HttpRaftController,
-        raftMachine: RaftMachine,
         raftLog: InMemoryRaftLog
     ) = install(
         acquire = {
@@ -170,7 +172,7 @@ class RestRaftServer : Callable<String> {
                         )
                     }
                 }
-                installRoutes(raftClusterNode, raftMachine, raftLog)
+                installRoutes(raftClusterNode, raftLog)
             }
         },
         release = { it, _ -> it.stop() }
@@ -178,7 +180,6 @@ class RestRaftServer : Callable<String> {
 
     private fun Application.installRoutes(
         raftClusterNode: HttpRaftController,
-        raft: RaftMachine,
         raftLog: InMemoryRaftLog
     ) {
         routing {
@@ -187,12 +188,6 @@ class RestRaftServer : Callable<String> {
             }
             route("/raft", raftClusterNode.endpoints)
             route("/entries") {
-                post {
-                    val entry = call.receive<ByteArray>()
-                    val result = raft.request(LogEntry.ClientCommand(entry))
-                    val response = Json.encodeToString(result)
-                    call.respondText(response)
-                }
                 get {
                     raftLog.getEntries(0, Int.MAX_VALUE)
                         .joinToString("\n") { it.entry.describe() }
@@ -225,23 +220,29 @@ class RestRaftServer : Callable<String> {
         release = { it, _ -> it.stop() }
     )
 
-    private fun newStateMachine() : StateMachine {
+    private fun newStateMachine() : StateMachine<*> {
         val clazz = Class.forName(stateMachine)
         require(StateMachine::class.java.isAssignableFrom(clazz)) {
             "State machine must implement the StateMachine interface"
         }
         val constructor = clazz.getConstructor()
-        return constructor.newInstance() as StateMachine
+        return constructor.newInstance() as StateMachine<*>
     }
 }
 
-class SimpleCounter : StateMachine{
+
+@JacocoExclusionNeedsGenerated
+@Serializable
+data object Inc : StateMachine.Command
+class SimpleCounter : StateMachine<Inc>{
 
     private val lastApplied = AtomicLong()
 
-    override suspend fun apply(command: LogEntry): ByteArray {
+    override val commandSerializer = Inc.serializer()
+
+    override suspend fun apply(message: StateMachine.Message<Inc>): ByteArray {
         // Do nothing for now
-        logger.info(entry("Applied", "command" to command.entry.describe()))
+        logger.info(entry("Applied", "message" to message))
         return "ADDED_${lastApplied.incrementAndGet()}"
             .encodeToByteArray()
     }
@@ -253,5 +254,5 @@ class SimpleCounter : StateMachine{
 
 private fun LogEntry.Entry.describe() = when (this) {
     is LogEntry.ClientCommand -> bytes.decodeToString()
-    is LogEntry.ConfigurationChange -> toString()
+    else -> toString()
 }

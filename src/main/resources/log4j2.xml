@@ -2,6 +2,10 @@
 <Configuration xmlns="https://logging.apache.org/xml/ns"
                xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
                xsi:schemaLocation="https://logging.apache.org/xml/ns https://logging.apache.org/xml/ns/log4j-config-2.23.1.xsd">
+    <Properties>
+        <Property name="LOG_LEVEL">${sys:logLevel:-WARN}</Property>
+        <Property name="DIAGNOSTIC">${sys:diagnostic:-DENY}</Property>
+    </Properties>
     <Appenders>
         <Console name="Console" target="SYSTEM_OUT">
             <PatternLayout pattern="%d{yyyy-MM-dd HH:mm:ss.SSS} | %level{INFO=ℹ️,DEBUG=🔧,ERROR=❌,WARN=⚠️} | [%10.10t] | %c{1} | %highlight{%m}%n"/>
@@ -14,13 +18,13 @@
         </Async>
     </Appenders>
     <MarkerFilter marker="RAFT_DIAGNOSTIC"
-                  onMatch="DENY"
+                  onMatch="${DIAGNOSTIC}"
                   onMismatch="NEUTRAL"/>
     <Loggers>
         <Root level="WARN">
             <AppenderRef ref="AsyncConsole"/>
         </Root>
-        <Logger name="io.r.raft" level="DEBUG" />
+        <Logger name="io.r.raft" level="${LOG_LEVEL}" />
         <Logger name="HttpMessagesLogger" level="INFO" additivity="false">
             <AppenderRef ref="HttpMessagesLoggerConsole"/>
         </Logger>

@@ -3,10 +3,13 @@ package io.r.raft.machine
 import io.r.raft.log.RaftLog
 import io.r.raft.log.RaftLog.Companion.getLastMetadata
 import io.r.raft.log.StateMachine
+import io.r.raft.log.StateMachine.Companion.commandMessageDeserializer
+import io.r.raft.machine.linearizability.IdempotentStateMachine
 import io.r.raft.protocol.LogEntry
 import io.r.raft.protocol.RaftMessage
 import io.r.raft.protocol.RaftRole
 import io.r.raft.transport.RaftCluster
+import io.r.toHex
 import io.r.utils.encodeBase64
 import io.r.utils.logs.entry
 import kotlinx.coroutines.CompletableDeferred
@@ -25,28 +28,33 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.selects.onTimeout
 import kotlinx.coroutines.selects.select
+import kotlinx.coroutines.withTimeout
+import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.Json
+import org.apache.commons.codec.digest.MurmurHash3
 import org.apache.logging.log4j.LogManager
 import org.apache.logging.log4j.Logger
 import org.apache.logging.log4j.MarkerManager
-import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 
-class RaftMachine(
+class RaftMachine<Cmd : StateMachine.Command>(
     private val configuration: Configuration,
     private val cluster: RaftCluster,
     private val log: RaftLog,
-    private val stateMachine: StateMachine,
+    stateMachine: StateMachine<Cmd>,
     private val scope: CoroutineScope = CoroutineScope(Dispatchers.IO),
     private val input: Channel<RaftMessage> = Channel(capacity = Channel.BUFFERED)
 ) {
 
+    private val stateMachine = IdempotentStateMachine(scope, stateMachine)
+
     /*
      * This class is used to keep track of the client requests
      */
-    private class IncomingRequest(
-        val entry: LogEntry.Entry,
-        val response: CompletableDeferred<ByteArray>,
-        val id: String = UUID.randomUUID().toString()
+    private class IncomingRequest<E>(
+        val entry: E,
+        val response: CompletableDeferred<Response>,
+        val id: String
     )
 
     private val logger: Logger = LogManager.getLogger("${this::class.qualifiedName}.${cluster.id}")
@@ -54,21 +62,24 @@ class RaftMachine(
     private val _role: MutableStateFlow<Role> = MutableStateFlow(
         createFollower(ServerState(0, 0))
     )
+
     /*
      * This job is used to run the main loop of the raft machine
      */
     private var job: Job? = null
+
     /*
      * This channel is used to receive client requests
      */
-    private val incomingRequests = Channel<IncomingRequest>(
+    private val incomingCommands = Channel<IncomingRequest<LogEntry.Entry>>(
         capacity = Channel.RENDEZVOUS,
         onUndeliveredElement = { it.response.completeExceptionally(IllegalStateException("RaftMachine is stopped")) },
     )
+
     /*
      * This map is used to keep track of the client requests that are waiting for commit
      */
-    private val waitingForCommit = ConcurrentHashMap<String, CompletableDeferred<ByteArray>>()
+    private val waitingForCommit = ConcurrentHashMap<String, CompletableDeferred<Response>>()
 
     val id get() = cluster.id
     val serverState get() = _role.value.serverState
@@ -100,14 +111,16 @@ class RaftMachine(
                                 log.setTerm(message.rpc.term)
                                 transitionTo(RaftRole.FOLLOWER)
                             }
+
                             _role.value.onReceivedMessage(message)
+
                         }
                         onTimeout(_role.value.timeout) {
                             logger.debug(entry("Timeout", "role" to _role.value::class.simpleName))
                             _role.value.onTimeout()
                         }
-                        incomingRequests.onReceive { command ->
-                            handleClientRequest(command)
+                        incomingCommands.onReceive { command ->
+                            handleClientCommand(command)
                         }
                     }
                 }
@@ -124,32 +137,52 @@ class RaftMachine(
         input.send(message)
     }
 
-    suspend fun request(e: LogEntry.Entry): Response =
-        when (val leader = serverState.leader) {
-            id -> {
-                val entry = IncomingRequest(
-                    entry = e,
-                    response = CompletableDeferred()
-                )
-                incomingRequests.send(entry)
-                logger.info {
-                    entry(
-                        "request_sent",
-                        "id" to entry.id,
-                        "request" to when (e) {
-                            is LogEntry.ClientCommand -> e.bytes.encodeBase64()
-                            is LogEntry.ConfigurationChange -> e
-                        }
-                    )
+    /**
+     * Execute a command in the state machine
+     */
+    suspend fun command(cmd: LogEntry.Entry): Response {
+        if (cmd is LogEntry.ClientCommand) {
+            requireIsDeserializable(cmd)
+        }
+        val payload = Json.encodeToString(cmd)
+            .encodeToByteArray()
+        val request = IncomingRequest(
+            id = MurmurHash3.hash128x64(payload).toHex(),
+            entry = cmd,
+            response = CompletableDeferred()
+        )
+        incomingCommands.send(request)
+        logger.info {
+            entry(
+                "request_sent",
+                "request" to cmd
+            )
+        }
+        return request.response.await()
+    }
+
+    /**
+     * Query the state machine
+     */
+    suspend fun query(query: ByteArray): Response {
+        return when (val role = _role.value) {
+            is Leader -> {
+                withTimeout(configuration.pendingCommandsTimeout) {
+                    role.heartBeatCompletion.await()
                 }
-                Response.Success(entry.response.await())
+                Response.Success(stateMachine.read(query))
             }
 
-            null -> Response.LeaderUnknown
-            else -> Response.NotALeader(cluster.getNode(leader).node)
+            else -> {
+                when (val leader = serverState.leader) {
+                    null -> Response.LeaderUnknown
+                    else -> Response.NotALeader(cluster.getNode(leader).node)
+                }
+            }
         }
+    }
 
-    private suspend fun handleClientRequest(request: IncomingRequest) {
+    private suspend fun handleClientCommand(request: IncomingRequest<LogEntry.Entry>) {
         when {
             _role.value is Leader -> {
                 val term = log.getTerm()
@@ -178,8 +211,13 @@ class RaftMachine(
 
             }
 
-            else -> request.response
-                .completeExceptionally(IllegalStateException("Only leader can accept commands"))
+            else -> {
+                val error = when (val leader = serverState.leader) {
+                    null -> Response.LeaderUnknown
+                    else -> Response.NotALeader(cluster.getNode(leader).node)
+                }
+                request.response.complete(error)
+            }
         }
     }
 
@@ -192,7 +230,7 @@ class RaftMachine(
                     "result" to result.decodeToString()
                 )
             }
-            complete(result)
+            complete(Response.Success(result))
         }
     }
 
@@ -215,22 +253,40 @@ class RaftMachine(
                     )
                 }
                 val result = when (it.entry) {
-                    is LogEntry.ClientCommand -> stateMachine.apply(it).also { b ->
-                        logger.info(entry("Applied", "command" to b.decodeToString()))
+                    is LogEntry.ClientCommand -> {
+                        val cmd = Json.decodeFromString(
+                            deserializer = stateMachine.commandMessageDeserializer(),
+                            string = it.entry.bytes.decodeToString()
+                        )
+                        stateMachine.apply(cmd).also {
+                            logger.info {
+                                entry(
+                                    "Applied",
+                                    "client_id" to cmd.clientId,
+                                    "id" to cmd.sequence,
+                                    "result" to it.decodeToString()
+                                )
+                            }
+                        }
                     }
+
                     is LogEntry.ConfigurationChange -> {
                         cluster.changeConfiguration(it.entry)
                         "true".encodeToByteArray()
                     }
+
+                    is LogEntry.NoOp -> null
                 }
+
                 serverState.lastApplied++
-                releaseCommit(it, result)
+
+                if (result != null) releaseCommit(it, result)
             }
         }
     }
 
     suspend fun stop() {
-        incomingRequests.cancel()
+        incomingCommands.cancel()
         waitingForCommit.forEach {
             it.value.cancel("Stopping RaftMachine")
         }
@@ -248,7 +304,7 @@ class RaftMachine(
             RaftRole.CANDIDATE -> createCandidate()
             RaftRole.LEADER -> createLeader()
         }
-        logger.info(entry("role_change", "to" to newRole, "term" to log.getTerm()))
+        logger.info(entry("role_change", "to" to _role.value::class.simpleName, "term" to log.getTerm()))
         _role.value.onEnter()
         return _role.value
     }
@@ -265,7 +321,12 @@ class RaftMachine(
          * index of the entry generated by the client command and the command id
          * if an entry with same index but different id is committed, we can reject the command
          */
-        val pendingCommandsTimeout: Long = 3000
+        val pendingCommandsTimeout: Long = 3000,
+        /**
+         * Timeout for the queries that are waiting for the leader
+         * to confirm it is still the leader
+         */
+        val pendingQueryTimeout: Long = 1000
     )
 
     private fun createFollower(serverState: ServerState = _role.value.serverState) = Follower(
@@ -293,7 +354,30 @@ class RaftMachine(
         configuration
     )
 
+    private fun requireIsDeserializable(cmd: LogEntry.ClientCommand) {
+        try {
+            Json.decodeFromString(
+                deserializer = stateMachine.commandMessageDeserializer(),
+                string = cmd.bytes.decodeToString()
+            )
+        } catch (e: Exception) {
+            logger.warn {
+                entry(
+                    "Invalid_Command",
+                    "command" to cmd.bytes.encodeBase64()
+                )
+            }
+            throw IllegalArgumentException(
+                "Invalid command " +
+                    "stateMachine=${stateMachine::class.qualifiedName} " +
+                    "command=${cmd.bytes.encodeBase64()}",
+                e
+            )
+        }
+    }
+
     companion object {
         val DIAGNOSTIC_MARKER = MarkerManager.getMarker("RAFT_DIAGNOSTIC")
+
     }
 }

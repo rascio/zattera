@@ -8,8 +8,10 @@ import io.r.raft.machine.Response
 import io.r.raft.protocol.LogEntry
 import io.r.raft.protocol.RaftMessage
 import io.r.raft.protocol.RaftRpc
+import io.r.raft.transport.Query
 import io.r.raft.transport.RaftCluster
 import io.r.raft.transport.RaftService
+import kotlinx.coroutines.yield
 
 class InMemoryRaftClusterNode(
     override val node: RaftRpc.ClusterNode,
@@ -19,18 +21,21 @@ class InMemoryRaftClusterNode(
     val channel get() = network.channel(node.id)
 
     override suspend fun send(message: RaftMessage) {
-        network.send(message)
+        yield().let { network.send(message) } // suspend to simulate network I/O
     }
 
     override suspend fun request(entry: LogEntry.Entry): Response =
-        network.forward(node.id, entry)
+        yield().let { network.command(node.id, entry) } // suspend to simulate network I/O
+
+    override suspend fun query(query: Query): Response =
+        yield().let { network.query(node.id, query) } // suspend to simulate network I/O
 
     companion object {
 
         /**
          * Make the [RaftTestNode] receive a message from the [RaftCluster]
          */
-        suspend inline fun InMemoryRaftClusterNode.sendTo(to: RaftTestNode, rpc: () -> RaftRpc) {
+        suspend inline fun InMemoryRaftClusterNode.sendTo(to: RaftTestNode<*>, rpc: () -> RaftRpc) {
             network.send(RaftMessage(from = node.id, to = to.id, rpc = rpc()))
         }
 

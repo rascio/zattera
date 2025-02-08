@@ -1,4 +1,7 @@
+@file:JacocoExclusionNeedsGenerated
+
 package io.r.kv
+
 
 import arrow.fx.coroutines.autoCloseable
 import arrow.fx.coroutines.resourceScope
@@ -7,6 +10,7 @@ import io.r.raft.protocol.LogEntry
 import io.r.raft.protocol.RaftRpc
 import io.r.raft.protocol.toClusterNode
 import io.r.raft.transport.ktor.HttpRaftCluster
+import io.r.utils.JacocoExclusionNeedsGenerated
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
@@ -18,6 +22,7 @@ import picocli.CommandLine.Parameters
 import java.util.Scanner
 import java.util.concurrent.Callable
 import kotlin.system.exitProcess
+
 
 fun main(args: Array<String>) {
     val exitCode = CommandLine(KeyValueCli()).execute(*args)
@@ -42,6 +47,7 @@ class KeyValueCli
     name = "shell",
     description = ["Start a shell to interact with the key-value store"]
 )
+@JacocoExclusionNeedsGenerated
 class ShellCommand : Callable<Int> {
     @Option(names = ["--peer"], description = ["The host to connect to"], required = true)
     lateinit var peers: List<String>

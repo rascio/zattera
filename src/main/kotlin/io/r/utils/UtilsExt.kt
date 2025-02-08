@@ -6,7 +6,6 @@ fun ByteArray.encodeBase64(): String = java.util.Base64.getEncoder().encodeToStr
 
 fun LogEntry.Entry.decodeToString() = when (this) {
     is LogEntry.ClientCommand -> bytes.decodeToString()
-    is LogEntry.ConfigurationChange -> toString()
-    else -> error("Not managed: $this")
+    else -> toString()
 }
 

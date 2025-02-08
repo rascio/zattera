@@ -1,13 +1,18 @@
 package io.r.raft.machine
 
 import arrow.fx.coroutines.resourceScope
+import io.kotest.assertions.withClue
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.matchers.comparables.shouldBeGreaterThan
-import io.kotest.matchers.comparables.shouldBeLessThan
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.shouldNotBe
 import io.kotest.matchers.types.shouldBeInstanceOf
+import io.r.kv.StringsKeyValueStore
+import io.r.raft.client.RaftClusterClient
+import io.r.raft.log.StateMachine
+import io.r.raft.machine.RaftTestCluster.Companion.append
 import io.r.raft.protocol.LogEntry
+import io.r.raft.protocol.LogEntry.ClientCommand
 import io.r.raft.protocol.LogEntryMetadata
 import io.r.raft.protocol.RaftMessage
 import io.r.raft.protocol.RaftRole
@@ -15,7 +20,6 @@ import io.r.raft.protocol.RaftRpc
 import io.r.raft.protocol.RaftRpc.AppendEntries
 import io.r.raft.protocol.RaftRpc.AppendEntriesResponse
 import io.r.raft.test.failOnTimeout
-import io.r.raft.test.installCoroutine
 import io.r.raft.transport.inmemory.InMemoryRaftClusterNode.Companion.sendTo
 import io.r.raft.transport.inmemory.InMemoryRaftClusterNode.Companion.shouldReceive
 import io.r.raft.transport.inmemory.installRaftClusterNetwork
@@ -32,10 +36,15 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.joinAll
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeout
-import kotlinx.coroutines.yield
+import kotlinx.serialization.decodeFromString
+import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.Json
 import org.apache.logging.log4j.LogManager
+import org.apache.logging.log4j.kotlin.logger
 import org.awaitility.Awaitility
+import java.util.concurrent.atomic.AtomicLong
 import kotlin.random.Random
+import kotlin.test.assertIs
 import kotlin.test.assertNotNull
 import kotlin.time.Duration.Companion.milliseconds
 import kotlin.time.Duration.Companion.seconds
@@ -176,10 +185,8 @@ class RaftMachineTest : FunSpec({
 
         test("A leader should be elected") {
             resourceScope {
-                val scope = installCoroutine()
                 val clusterNetwork = installRaftClusterNetwork()
                 val cluster = installRaftTestCluster(
-                    scope = scope,
                     network = clusterNetwork,
                     nodeIds = refs,
                     config = { _ ->
@@ -197,7 +204,6 @@ class RaftMachineTest : FunSpec({
             resourceScope {
                 val clusterNetwork = installRaftClusterNetwork()
                 val cluster = installRaftTestCluster(
-                    scope = installCoroutine(),
                     network = clusterNetwork,
                     nodeIds = refs,
                     config = {
@@ -230,10 +236,8 @@ class RaftMachineTest : FunSpec({
         }
         test("When append is signaled committed, it should be present in majority of nodes") {
             resourceScope {
-                val scope = installCoroutine()
                 val clusterNetwork = installRaftClusterNetwork()
                 val cluster = installRaftTestCluster(
-                    scope = scope,
                     network = clusterNetwork,
                     nodeIds = refs,
                     config = { _ ->
@@ -246,13 +250,11 @@ class RaftMachineTest : FunSpec({
                 )
                 val leader = cluster.awaitFindLeader()
                 failOnTimeout("timeout waiting for command to be processed", 400.milliseconds) {
-                    leader.raftMachine.request(
-                        LogEntry.ClientCommand("Hello World".encodeToByteArray())
-                    )
+                    leader.raftMachine.command("Hello World".toTestCommand())
                 }
                 val stored = cluster.nodes
                     .map { it.log.getLastIndex() }
-                    .count { it == 1L }
+                    .count { it == leader.commitIndex }
 
                 stored shouldBeGreaterThan cluster.nodes.size / 2
             }
@@ -260,10 +262,8 @@ class RaftMachineTest : FunSpec({
 
         test("A disconnected leader should replace non-committed entries with the new leader's log") {
             resourceScope {
-                val scope = installCoroutine()
                 val clusterNetwork = installRaftClusterNetwork()
                 val cluster = installRaftTestCluster(
-                    scope = scope,
                     network = clusterNetwork,
                     nodeIds = refs,
                     config = { _ ->
@@ -280,7 +280,7 @@ class RaftMachineTest : FunSpec({
 
                 logger.info("Append_a_command_to_the_leader")
                 leader.raftMachine
-                    .request(LogEntry.ClientCommand("First_entry_for_everyone".encodeToByteArray()))
+                    .command("First_entry_for_everyone".toTestCommand())
 
                 logger.info("Disconnect_the_leader_from_the_cluster")
                 leader.disconnect()
@@ -300,13 +300,13 @@ class RaftMachineTest : FunSpec({
                 launch {
                     logger.info("Append_a_command_to_the_old_leader [${leader.id}]")
                     leader.raftMachine
-                        .request(LogEntry.ClientCommand("Entry_to_be_replaced".encodeToByteArray()))
+                        .command("Entry_to_be_replaced".toTestCommand())
                 }
                 val newLeaderCommitted = launch {
                     logger.info("Append a list of commands to the new leader [${newLeader.id}")
                     newLeader.raftMachine.apply {
-                        request(LogEntry.ClientCommand("New_entry_1".encodeToByteArray()))
-                        request(LogEntry.ClientCommand("New_entry_2".encodeToByteArray()))
+                        command("New_entry_1".toTestCommand())
+                        command("New_entry_2".toTestCommand())
                     }
                 }
 
@@ -343,71 +343,77 @@ class RaftMachineTest : FunSpec({
                             "index" to n.commitIndex,
                             "logs" to logs.joinToString { "[T${it.term}|${it.entry.decodeToString()}]" })
                     )
-                    logs.map { it.entry.decodeToString() } shouldBe expectedLogs
+                    val actualCmds = logs
+                        .filter { it.entry is ClientCommand }
+                        .map { it.entry.decodeToString() }
+                        .map { Json.decodeFromString<StateMachine.Message<TestCmd>>(it) }
+                        .map { it.payload.value }
+                    actualCmds shouldBe expectedLogs
                 }
             }
         }
-        test("In case of network partition the order of messages should be preserved") {
+        test("Test linearaizability of client commands").config(timeout = 30.seconds) {
             resourceScope {
-                val scope = installCoroutine()
+                // C clients sending B batches of M messages each
+                val C = 8
+                val M = 15
+
                 val clusterNetwork = installRaftClusterNetwork()
                 val cluster = installRaftTestCluster(
-                    scope = scope,
                     network = clusterNetwork,
-                    nodeIds = (1..5).map { "T$it" },
+                    nodeIds = (1..3).map { "T$it" },
                     config = {
                         RaftMachine.Configuration(
                             maxLogEntriesPerAppend = 4,
-                            leaderElectionTimeoutMs = 200L,
-                            leaderElectionTimeoutJitterMs = 100,
+                            leaderElectionTimeoutMs = 100L,
+                            leaderElectionTimeoutJitterMs = 60,
+                            heartbeatTimeoutMs = 30L,
+                            pendingCommandsTimeout = 5000L
                         )
-                    }
+                    },
+                    stateMachineFactory = { StringsKeyValueStore() }
                 )
+                val client = RaftClusterClient(clusterNetwork, RaftClusterClient.Configuration(retry = 10))
                 logger.info("----- started -----")
-                val messagePattern = Regex("([A-Z])-([0-9]+)")
-                // C clients sending B batches of M messages each
-                val C = 8
-                val B = 15
-                val M = 5
 
                 coroutineScope {
                     val clientsSendingEntriesJob = launch {
-                        startClientsSendingBatches(C, B, M, cluster)
+                        startClientsSendingBatches(C, M, client)
+                            .joinAll()
                     }
                     launch(CoroutineName("Chaos")) {
-                        // Randomly disconnect the leader
+                        // Disconnect the leader
                         do {
-                            cluster.awaitFindLeader(timeout = 5.seconds).apply {
-                                disconnect()
-                                cluster.awaitDifferentLeaderElected(id, timeout = 5.seconds)
-                                delay(configuration.heartbeatTimeoutMs * Random.nextLong(3, 10))
-                                reconnect()
+                            cluster.nodes.forEach { node ->
+                                if (node.isLeader()) {
+                                    node.disconnect()
+                                    delay(node.configuration.heartbeatTimeoutMs * Random.nextLong(5, 10))
+                                    node.reconnect()
+                                    delay(node.configuration.heartbeatTimeoutMs * Random.nextLong(8, 15))
+                                }
                             }
                         } while (clientsSendingEntriesJob.isActive)
+                    }.invokeOnCompletion {
+                        cluster.nodes.forEach { it.reconnect() }
                     }
+                    clientsSendingEntriesJob.join()
                 }
                 cluster.awaitLogConvergence(10.seconds)
-                cluster.nodes.forEach { n ->
-                    val logs = n.log.getEntries(1, Int.MAX_VALUE)
-                    logger.info(entry("check_log", "node" to n.id, "logs" to logs.hashCode()))
-                    // The logs can have a mixed order between clients,
-                    // but the messages from the same client should be in order
-                    val lastIndexByClient = mutableMapOf<String, Int>()
-                    logs.forEach { entry ->
-                        logger.info(
-                            entry(
-                                "check_entry",
-                                "term" to entry.term,
-                                "command" to entry.entry.decodeToString()
-                            )
-                        )
-                        val message = entry.entry.decodeToString()
-                        val (client, i) = messagePattern.matchEntire(message)!!
-                            .destructured
-                            .let { (c, i) -> c to i.toInt() }
-                        val lastIndex = lastIndexByClient[client] ?: -1
-                        lastIndex shouldBeLessThan i
-                        lastIndexByClient[client] = i
+                cluster.dumpRaftLogs(decode = true)
+                ('A'..('A' + C)).forEach { key ->
+                    val string = StringsKeyValueStore.Get("$key")
+                        .toJson()
+                        .let { client.query(it) }
+                    val response = string.getOrThrow()
+                        .toKvResponse()
+                    assertIs<StringsKeyValueStore.Value>(response)
+                    val list = response
+                        .value
+                        .split(",")
+                        .drop(1) // messages start with a comma
+
+                    withClue("Key $key") {
+                        list shouldBe (0 until M).map { "$it" }
                     }
                 }
             }
@@ -418,10 +424,8 @@ class RaftMachineTest : FunSpec({
         val refs = (1..2).map { "N$it" }
 
         resourceScope {
-            val scope = installCoroutine()
             val network = installRaftClusterNetwork()
             val cluster = installRaftTestCluster(
-                scope = scope,
                 network = network,
                 nodeIds = refs,
                 config = { _ ->
@@ -466,9 +470,7 @@ class RaftMachineTest : FunSpec({
                 initialLeader.disconnect()
                 val leader = cluster.awaitDifferentLeaderElected(initialLeader.id)
 
-                leader.raftMachine.request(
-                    LogEntry.ClientCommand("Second".encodeToByteArray())
-                )
+                leader.raftMachine.command("Second".toTestCommand())
                 leader.commitIndex shouldBeGreaterThan initialCommit
                 initialLeader.reconnect()
             }
@@ -479,27 +481,35 @@ class RaftMachineTest : FunSpec({
 
 private fun CoroutineScope.startClientsSendingBatches(
     clients: Int,
-    batches: Int,
-    messagesPerBatch: Int,
-    cluster: RaftTestCluster
-) {
-    ('A'..('A' + clients)).forEach { client ->
+    messages: Int,
+    raftClusterClient: RaftClusterClient
+) =
+    ('A'..('A' + clients)).map { client ->
         launch(Dispatchers.IO) {
-            val messages = generateSequence(1, Int::inc)
-                .map { m -> "$client-$m" }
-                .iterator()
-            repeat(batches) { // batches
-                val batch = messages.asSequence()
-                    .take(messagesPerBatch)
-                    .map { LogEntry.ClientCommand(it.encodeToByteArray()) }
-                    .toList()
-                cluster.awaitFindLeader(5.seconds).apply {
-                    batch.forEach {
-                        raftMachine.request(it)
+            repeat(messages) { n -> // batches
+                StringsKeyValueStore.Set("$client", "${'$'}{$client},$n")
+                    .toClientCommand("$client")
+                    .also {
+                        logger.debug {
+                            entry("Client_Send", "client" to client, "msg" to "$client$n", "entry" to it)
+                        }
                     }
-                    delay(40)
-                }
+                    .let { raftClusterClient.request(it).getOrThrow() }
             }
         }
     }
-}
+
+val KV_CMD_SEQUENCE = AtomicLong()
+private fun StringsKeyValueStore.KVCommand.toClientCommand(client: String) =
+    StateMachine.Message(client, KV_CMD_SEQUENCE.incrementAndGet(), this)
+        .let { Json.encodeToString(it) }
+        .encodeToByteArray()
+        .let(::ClientCommand)
+
+private fun ByteArray.toKvResponse() =
+    this.decodeToString()
+        .let { Json.decodeFromString<StringsKeyValueStore.Response>(it) }
+
+private fun StringsKeyValueStore.Request.toJson() =
+    Json.encodeToString(this)
+        .encodeToByteArray()

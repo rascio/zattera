@@ -12,6 +12,7 @@ import io.r.raft.transport.RaftCluster
 import io.r.raft.transport.RaftService
 import io.r.utils.logs.entry
 import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.withTimeout
 import org.apache.logging.log4j.LogManager
 import org.apache.logging.log4j.Logger
 
@@ -26,7 +27,7 @@ class RaftClusterTestNetwork(
         nodeIds.forEach { id -> put(id, Channel(Channel.UNLIMITED)) }
     }
     private val _peers = mutableMapOf<NodeId, InMemoryRaftClusterNode>()
-    private val _raftMachines = mutableMapOf<NodeId, RaftMachine>()
+    private val _raftMachines = mutableMapOf<NodeId, RaftMachine<*>>()
 
     // This method should be private, but it is used in InMemoryRaftClusterNode
     // Procrastination: I will do it later (read: never)
@@ -40,11 +41,11 @@ class RaftClusterTestNetwork(
         }
         when {
             message.to in isolatedNodes -> {
-                logger.info(entry("isolated_node", "node" to message.to, "rpc" to message.rpc::class.simpleName))
+                logger.debug { entry("isolated_node", "node" to message.to, "rpc" to message.rpc::class.simpleName) }
             }
 
             message.from in isolatedNodes -> {
-                logger.info(entry("isolated_node", "node" to message.from, "rpc" to message.rpc::class.simpleName))
+                logger.debug { entry("isolated_node", "node" to message.from, "rpc" to message.rpc::class.simpleName) }
             }
 
             else -> {
@@ -53,7 +54,8 @@ class RaftClusterTestNetwork(
             }
         }
     }
-    suspend fun forward(id: NodeId, entry: LogEntry.Entry): Response {
+
+    suspend fun command(id: NodeId, entry: LogEntry.Entry): Response {
         val raftMachine = requireNotNull(_raftMachines[id]) {
             "Node $id not found"
         }
@@ -64,15 +66,32 @@ class RaftClusterTestNetwork(
             }
 
             else -> {
-                logger.info("-- $entry --> $id")
-                raftMachine.request(entry)
+                logger.info("-- !$entry --> $id")
+                raftMachine.command(entry)
             }
         }
     }
 
-    fun createNode(name: NodeId, raftMachine: RaftMachine? = null): InMemoryRaftClusterNode {
+    suspend fun query(id: NodeId, query: ByteArray): Response {
+        val raftMachine = requireNotNull(_raftMachines[id]) {
+            "Node $id not found"
+        }
+        return when {
+            id in isolatedNodes -> {
+                logger.info(entry("isolated_node", "node" to id, "query" to query))
+                error("Node $id is isolated")
+            }
+
+            else -> {
+                logger.info("-- ?$query --> $id")
+                raftMachine.query(query)
+            }
+        }
+    }
+
+    fun createNode(name: NodeId, raftMachine: RaftMachine<*>? = null): InMemoryRaftClusterNode {
         channels.computeIfAbsent(name) { Channel(Channel.UNLIMITED) }
-        if (raftMachine != null){
+        if (raftMachine != null) {
             _raftMachines[name] = raftMachine
         }
         val node = RaftRpc.ClusterNode(name, "localhost", 0)
@@ -107,6 +126,7 @@ class RaftClusterTestNetwork(
 
     override fun get(nodeId: NodeId): RaftService? =
         _peers[nodeId]
+
     override suspend fun connect(node: RaftRpc.ClusterNode) {
         channel(node.id)
     }

@@ -11,6 +11,7 @@ import io.r.raft.machine.Response
 import io.r.raft.protocol.LogEntry
 import io.r.raft.protocol.RaftMessage
 import io.r.raft.protocol.RaftRpc
+import io.r.raft.transport.Query
 import io.r.raft.transport.RaftService
 import io.r.utils.logs.entry
 import kotlinx.coroutines.withTimeout
@@ -70,6 +71,21 @@ class HttpRaftService(
         }
         if (response.status != HttpStatusCode.OK) {
             logger.warn(entry("forwarding_failure", "to" to node.id, "entry" to entry, "status" to response.status))
+        } else {
+            connected = true
+        }
+        return response.readBytes()
+            .decodeToString()
+            .let { json.decodeFromString<Response>(it) }
+    }
+
+    override suspend fun query(query: Query): Response {
+        val response = client.post("http://${node.host}:${node.port}/raft/query") {
+            contentType(ContentType.Application.Json)
+            setBody(query)
+        }
+        if (response.status != HttpStatusCode.OK) {
+            logger.warn(entry("forwarding_failure", "to" to node.id, "query" to query, "status" to response.status))
         } else {
             connected = true
         }

@@ -5,6 +5,7 @@ import io.r.raft.protocol.LogEntry
 import io.r.raft.protocol.NodeId
 import io.r.raft.protocol.Term
 import io.r.raft.log.inmemory.InMemoryRaftLog
+import io.r.raft.protocol.randomAlphabetic
 import java.util.TreeMap
 
 class RaftLogBuilderScope {
@@ -13,7 +14,7 @@ class RaftLogBuilderScope {
     private val log = TreeMap<Index, LogEntry>()
 
     operator fun String.unaryPlus() {
-        log[log.size + 1L] = LogEntry(term, LogEntry.ClientCommand(this.encodeToByteArray()))
+        log[log.size + 1L] = LogEntry(term, LogEntry.ClientCommand(this.encodeToByteArray()), randomAlphabetic())
     }
 
     operator fun LogEntry.unaryPlus() {

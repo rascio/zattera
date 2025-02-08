@@ -20,18 +20,24 @@ import io.r.raft.transport.inmemory.InMemoryRaftClusterNode.Companion.shouldRece
 import io.r.raft.transport.inmemory.installRaftClusterNetwork
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.channels.ChannelResult
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.selects.onTimeout
+import kotlinx.coroutines.selects.select
 import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.withTimeoutOrNull
 import org.apache.logging.log4j.LogManager
 import kotlin.test.assertEquals
 import kotlin.test.assertIs
 import kotlin.test.assertNull
+import kotlin.test.fail
 import kotlin.time.Duration.Companion.milliseconds
 import kotlin.time.Duration.Companion.seconds
 
-@OptIn(ExperimentalKotest::class)
+@OptIn(ExperimentalKotest::class, ExperimentalCoroutinesApi::class)
 class LeaderTest : FunSpec({
 
     val logger = LogManager.getLogger(LeaderTest::class.java)
@@ -53,8 +59,87 @@ class LeaderTest : FunSpec({
                     scope = installCoroutine(Dispatchers.IO),
                     raftCluster = RaftCluster("UnderTest", network)
                 )
+
                 leader.onEnter()
+
+                val term2NoOpEntry = LogEntry(
+                    term = 2,
+                    entry = LogEntry.NoOp,
+                    id = "UnderTest-NOOP"
+                )
+                val lastCommittedEntry = log.getMetadata(log.getLastIndex() - 1)!!
+                test("Append a NoOp operation to the log to ensure read linearaizability") {
+                    log.getEntries(
+                        from = log.getLastIndex(),
+                        length = 1
+                    ) shouldBe listOf(term2NoOpEntry)
+                }
                 test("send initial empty AppendEntries RPCs (heartbeat) to each server").config(timeout = 1.seconds) {
+                    N1 shouldReceive RaftMessage(
+                        from = "UnderTest",
+                        to = "N1",
+                        rpc = RaftRpc.AppendEntries(
+                            term = 2,
+                            leaderId = "UnderTest",
+                            prevLog = lastCommittedEntry,
+                            entries = listOf(term2NoOpEntry),
+                            leaderCommit = lastCommittedEntry.index
+                        )
+                    )
+                    N2 shouldReceive RaftMessage(
+                        from = "UnderTest",
+                        to = "N2",
+                        rpc = RaftRpc.AppendEntries(
+                            term = 2,
+                            leaderId = "UnderTest",
+                            prevLog = lastCommittedEntry,
+                            entries = listOf(term2NoOpEntry),
+                            leaderCommit = lastCommittedEntry.index
+                        )
+                    )
+                }
+                test("repeat (heartbeat) during idle periods to prevent election timeouts").config(timeout = 3.seconds) {
+                    logger.info("repeat (heartbeat) during idle periods to prevent election timeouts")
+                    repeat(2) {
+                        N1 shouldReceive RaftMessage(
+                            from = "UnderTest",
+                            to = "N1",
+                            rpc = RaftRpc.AppendEntries(
+                                term = 2,
+                                leaderId = "UnderTest",
+                                prevLog = lastCommittedEntry,
+                                entries = listOf(term2NoOpEntry),
+                                leaderCommit = lastCommittedEntry.index
+                            )
+                        )
+                        N2 shouldReceive RaftMessage(
+                            from = "UnderTest",
+                            to = "N2",
+                            rpc = RaftRpc.AppendEntries(
+                                term = 2,
+                                leaderId = "UnderTest",
+                                prevLog = lastCommittedEntry,
+                                entries = listOf(term2NoOpEntry),
+                                leaderCommit = lastCommittedEntry.index
+                            )
+                        )
+                    }
+                }
+                test("send empty entries in heartbeat after receiving positive response") {
+                    repeat(2) {
+                        leader.onReceivedMessage(
+                            RaftMessage(
+                                from = "N${it + 1}",
+                                to = "UnderTest",
+                                rpc = RaftRpc.AppendEntriesResponse(
+                                    term = 2,
+                                    matchIndex = log.getLastIndex(),
+                                    success = true,
+                                    entries = 1
+                                )
+                            )
+                        )
+                    }
                     N1 shouldReceive RaftMessage(
                         from = "UnderTest",
                         to = "N1",
@@ -77,33 +162,7 @@ class LeaderTest : FunSpec({
                             leaderCommit = log.getLastIndex()
                         )
                     )
-                }
-                test("repeat (heartbeat) during idle periods to prevent election timeouts").config(timeout = 3.seconds) {
-                    logger.info("repeat (heartbeat) during idle periods to prevent election timeouts")
-                    repeat(2) {
-                        N1 shouldReceive RaftMessage(
-                            from = "UnderTest",
-                            to = "N1",
-                            rpc = RaftRpc.AppendEntries(
-                                term = 2,
-                                leaderId = "UnderTest",
-                                prevLog = log.getLastMetadata(),
-                                entries = emptyList(),
-                                leaderCommit = log.getLastIndex()
-                            )
-                        )
-                        N2 shouldReceive RaftMessage(
-                            from = "UnderTest",
-                            to = "N2",
-                            rpc = RaftRpc.AppendEntries(
-                                term = 2,
-                                leaderId = "UnderTest",
-                                prevLog = log.getLastMetadata(),
-                                entries = emptyList(),
-                                leaderCommit = log.getLastIndex()
-                            )
-                        )
-                    }
+
                 }
             }
         }
@@ -286,6 +345,7 @@ class LeaderTest : FunSpec({
                         )
                     )
                 )
+                val lastCommittedEntry = LogEntryMetadata(index = 1, term = 0)
                 val N1 = network.createNode("N1")
 
                 logger.info("Waiting for heartbeat")
@@ -296,7 +356,7 @@ class LeaderTest : FunSpec({
                         rpc = RaftRpc.AppendEntries(
                             term = 0,
                             leaderId = "UnderTest",
-                            prevLog = LogEntryMetadata.ZERO,
+                            prevLog = lastCommittedEntry,
                             entries = emptyList(),
                             leaderCommit = 0
                         )
@@ -366,7 +426,7 @@ class LeaderTest : FunSpec({
                 assertIs<RaftRpc.AppendEntries>(response)
                 assertEquals(2, response.prevLog.index)
                 assertEquals(5, response.prevLog.term)
-                assertEquals(0, response.entries.size)
+                assertEquals(1, response.entries.size)
                 assertEquals(2, response.leaderCommit)
                 logger.info("Received initial AppendEntries, responding...")
                 leader.onReceivedMessage(
@@ -387,7 +447,7 @@ class LeaderTest : FunSpec({
                         assertEquals(5, term)
                         assertEquals(2, prevLog.index)
                         assertEquals(5, prevLog.term)
-                        assertEquals(0, entries.size)
+                        assertEquals(1, entries.size)
                         assertEquals(2, leaderCommit)
                     }
             }
@@ -406,9 +466,10 @@ class LeaderTest : FunSpec({
                     +"Command-5"
                     term = 17
                 }
+                val initialCommittedIndex = 5L
                 val peersState = mutableMapOf(
                     "N1" to PeerState(
-                        nextIndex = log.getLastIndex() + 1,
+                        nextIndex = initialCommittedIndex,
                         matchIndex = 0,
                         lastContactTime = System.currentTimeMillis() - 200
                     )
@@ -419,7 +480,7 @@ class LeaderTest : FunSpec({
                     scope = installCoroutine(Dispatchers.IO),
                     raftCluster = RaftCluster("UnderTest", network),
                     peersState = peersState,
-                    serverState = ServerState(5, 5)
+                    serverState = ServerState(initialCommittedIndex, initialCommittedIndex)
                 )
                 leader.onEnter()
                 val msg = N1.channel.receive().rpc as RaftRpc.AppendEntries
@@ -439,7 +500,8 @@ class LeaderTest : FunSpec({
                         )
                     )
                 )
-                peersState["N1"]!!.nextIndex shouldBe log.getLastIndex()
+                // server has added the noop, so the peer nextIndex shouldBe (initialCommittedIndex + 1 - 1)
+                peersState["N1"]!!.nextIndex shouldBe initialCommittedIndex
                 peersState["N1"]!!.matchIndex shouldBe 0
                 // so it should try to send the log at index 1, prevLog = 0
                 N1 shouldReceive RaftMessage(
@@ -450,13 +512,217 @@ class LeaderTest : FunSpec({
                         leaderId = "UnderTest",
                         prevLog = log.getMetadata(msg.prevLog.index - 1)!!,
                         entries = emptyList(),
-                        leaderCommit = log.getLastIndex()
+                        leaderCommit = log.getLastIndex() - 1 // noop is not committed yet
                     )
                 )
             }
         }
+    }
+    context("HeartbeatCompletion") {
+        test("HeartbeatCompletion.await() send heartbeat and notify after receiving majority of responses").config(timeout = 1.seconds) {
+            resourceScope {
+                val network = installRaftClusterNetwork()
+                val nodes = listOf("N1", "N2").map {
+                    network.createNode(it)
+                }
+                val (changeRoleFn) = mockRoleTransition()
+                val log = raftLog {
+                    term = 1
+                }
+                val leader = installLeader(
+                    log = log,
+                    changeRoleFn = changeRoleFn,
+                    scope = installCoroutine(Dispatchers.IO),
+                    raftCluster = RaftCluster("UnderTest", network),
+                    peersState = nodes
+                        .associate { it.node.id to PeerState(nextIndex = 1, matchIndex = 0, lastContactTime = 0) }
+                        .toMutableMap()
+                )
+                // await for the quorum to accept the heartbeat
+                val notification = launch {
+                    leader.heartBeatCompletion.await()
+                }
+                withTimeout(300) {
+                    nodes.forEach { node ->
+                        node shouldReceive RaftMessage(
+                            from = "UnderTest",
+                            to = node.node.id,
+                            rpc = RaftRpc.AppendEntries(
+                                term = 1,
+                                leaderId = "UnderTest",
+                                prevLog = LogEntryMetadata.ZERO,
+                                entries = emptyList(),
+                                leaderCommit = log.getLastIndex()
+                            )
+                        )
+                    }
+                }
+                leader.onReceivedMessage(
+                    RaftMessage(
+                        from = "N1",
+                        to = "UnderTest",
+                        rpc = RaftRpc.AppendEntriesResponse(
+                            term = 1,
+                            matchIndex = 0,
+                            success = true,
+                            entries = 0
+                        )
+                    )
+                )
+                withTimeout(100) {
+                    notification.join()
+                }
+            }
+        }
+        test("HeartbeatCompletion.await() send heartbeat and don't notify if majority of cluster didn't responded").config(timeout = 5.seconds) {
+            resourceScope {
+                val network = installRaftClusterNetwork()
+                val nodes = listOf("N1", "N2", "N3", "N4").map {
+                    network.createNode(it)
+                }
+                val (changeRoleFn) = mockRoleTransition()
+                val log = raftLog {
+                    term = 1
+                }
+                val leader = installLeader(
+                    log = log,
+                    changeRoleFn = changeRoleFn,
+                    scope = installCoroutine(Dispatchers.IO),
+                    raftCluster = RaftCluster("UnderTest", network),
+                    peersState = nodes
+                        .associate { it.node.id to PeerState(nextIndex = 1, matchIndex = 0, lastContactTime = 0) }
+                        .toMutableMap()
+                )
+                // await for the quorum to accept the heartbeat
+                val notification = launch {
+                    leader.heartBeatCompletion.await()
+                }
+                withTimeout(300) {
+                    nodes.forEach { node ->
+                        node shouldReceive RaftMessage(
+                            from = "UnderTest",
+                            to = node.node.id,
+                            rpc = RaftRpc.AppendEntries(
+                                term = 1,
+                                leaderId = "UnderTest",
+                                prevLog = LogEntryMetadata.ZERO,
+                                entries = emptyList(),
+                                leaderCommit = log.getLastIndex()
+                            )
+                        )
+                    }
+                }
+                leader.onReceivedMessage(
+                    RaftMessage(
+                        from = "N1",
+                        to = "UnderTest",
+                        rpc = RaftRpc.AppendEntriesResponse(
+                            term = 1,
+                            matchIndex = 0,
+                            success = true,
+                            entries = 0
+                        )
+                    )
+                )
+                logger.debug("Waiting_for_timeout")
+                select {
+                    notification.onJoin { fail("Should not notify") }
+                    onTimeout(300) { notification.cancelAndJoin() }
+                }
+            }
+        }
+        test("await() multiple times before receiving response do not send multiple heartbeats").config(timeout = 5.seconds) {
+            resourceScope {
+                val network = installRaftClusterNetwork()
+                val nodes = listOf("N1", "N2", "N3", "N4", "N5", "N6").map {
+                    network.createNode(it)
+                }
+                val (changeRoleFn) = mockRoleTransition()
+                val log = raftLog {
+                    term = 1
+                }
+                val leader = installLeader(
+                    log = log,
+                    changeRoleFn = changeRoleFn,
+                    scope = installCoroutine(Dispatchers.IO),
+                    raftCluster = RaftCluster("UnderTest", network),
+                    peersState = nodes
+                        .associate { it.node.id to PeerState(nextIndex = 1, matchIndex = 0, lastContactTime = 0) }
+                        .toMutableMap()
+                )
+                // make things more complicated
+                // some nodes will respond before the second await() and some after
+                val (respondBeforeSecondAwait, respondAfterSecondAwait) = nodes.split(2)
+
+                // await for the quorum to accept the heartbeat
+                val notification1 = launch {
+                    leader.heartBeatCompletion.await()
+                }
+                withTimeout(300) {
+                    respondBeforeSecondAwait.forEach { node ->
+                        node shouldReceive RaftMessage(
+                            from = "UnderTest",
+                            to = node.node.id,
+                            rpc = RaftRpc.AppendEntries(
+                                term = 1,
+                                leaderId = "UnderTest",
+                                prevLog = LogEntryMetadata.ZERO,
+                                entries = emptyList(),
+                                leaderCommit = log.getLastIndex()
+                            )
+                        )
+                    }
+                }
+
+                val notification2 = launch {
+                    leader.heartBeatCompletion.await()
+                }
+                withTimeout(300) {
+                    respondAfterSecondAwait.forEach { node ->
+                        node shouldReceive RaftMessage(
+                            from = "UnderTest",
+                            to = node.node.id,
+                            rpc = RaftRpc.AppendEntries(
+                                term = 1,
+                                leaderId = "UnderTest",
+                                prevLog = LogEntryMetadata.ZERO,
+                                entries = emptyList(),
+                                leaderCommit = log.getLastIndex()
+                            )
+                        )
+                    }
+                }
+
+                nodes.forEach {
+                    leader.onReceivedMessage(
+                        RaftMessage(
+                            from = it.node.id,
+                            to = "UnderTest",
+                            rpc = RaftRpc.AppendEntriesResponse(
+                                term = 1,
+                                matchIndex = 0,
+                                success = true,
+                                entries = 0
+                            )
+                        )
+                    )
+                }
+                logger.debug("Waiting_for_timeout")
+                withTimeout(100) {
+                    notification1.join()
+                    notification2.join()
+                }
+                select {
+                    nodes.forEach { node ->
+                        node.channel.onReceive { fail("no more messages should be sent. message=$it") }
+                    }
+                    onTimeout(300) { /*everything is fine*/ }
+                }
+            }
+        }
 
     }
+
 }) {
     companion object {
         private suspend fun ResourceScope.installLeader(
@@ -483,5 +749,8 @@ class LeaderTest : FunSpec({
             },
             release = { l, _ -> l.onExit() }
         )
+
+        private fun <T> List<T>.split(index: Int) =
+            subList(0, index) to subList(index, size)
     }
 }

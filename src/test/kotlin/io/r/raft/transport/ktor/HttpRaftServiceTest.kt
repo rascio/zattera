@@ -21,7 +21,7 @@ import io.r.raft.protocol.RaftRpc
 class HttpRaftServiceTest : FunSpec({
 
 
-    val raftMachine = mockk<RaftMachine>(relaxed = true) {
+    val raftMachine = mockk<RaftMachine<*>>(relaxed = true) {
         every { id } returns "local"
     }
 
@@ -72,7 +72,7 @@ class HttpRaftServiceTest : FunSpec({
                 )
             )
             httpRemote.request(entry)
-            coVerify(exactly = 1) { raftMachine.request(entry) }
+            coVerify(exactly = 1) { raftMachine.command(entry) }
         }
     }
 

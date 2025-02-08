@@ -2,6 +2,8 @@
 
 help_message="
 Usage: start_node.sh -id <node_id> -cluster-size <cluster_size> [-debug] [-store-log]
+
+Arguments:
   -id: node number as an argument
     use it to pick the id and set the port, eg. N1 -> 8081, N2 -> 8082, etc.
   -cluster-size: core cluster size
@@ -53,7 +55,7 @@ done
 port=$((8080 + $node))
 # define timeout_params parameters
 if [ "$debug" = true ]; then
-  timeout_params="--election-timeout=5000 --heartbeat-timeout=1000 --election-jitter=500 --debug-messages"
+  timeout_params="--election-timeout=5000 --heartbeat-timeout=1000 --election-jitter=500 --debug"
 else
   timeout_params="--election-timeout=300 --heartbeat-timeout=100 --election-jitter=100"
 fi
