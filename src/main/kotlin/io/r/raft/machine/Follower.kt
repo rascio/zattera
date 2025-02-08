@@ -28,7 +28,7 @@ class Follower(
         is RaftRpc.RequestVote -> {
             val granted = message.rpc.term >= log.getTerm()
                 && log.getVotedFor().let { it == null || it == message.from }
-                && message.rpc.lastLog >= log.getLastMetadata()
+                && message.rpc.lastLog >= log.getMetadata(serverState.commitIndex)!!
             log.setVotedFor(message.from)
             cluster.send(
                 to = message.from,

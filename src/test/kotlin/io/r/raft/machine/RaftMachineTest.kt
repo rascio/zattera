@@ -254,7 +254,7 @@ class RaftMachineTest : FunSpec({
                 }
                 val stored = cluster.nodes
                     .map { it.log.getLastIndex() }
-                    .count { it == 1L }
+                    .count { it == leader.commitIndex }
 
                 stored shouldBeGreaterThan cluster.nodes.size / 2
             }
@@ -343,7 +343,9 @@ class RaftMachineTest : FunSpec({
                             "index" to n.commitIndex,
                             "logs" to logs.joinToString { "[T${it.term}|${it.entry.decodeToString()}]" })
                     )
-                    val actualCmds = logs.map { it.entry.decodeToString() }
+                    val actualCmds = logs
+                        .filter { it.entry is ClientCommand }
+                        .map { it.entry.decodeToString() }
                         .map { Json.decodeFromString<StateMachine.Message<TestCmd>>(it) }
                         .map { it.payload.value }
                     actualCmds shouldBe expectedLogs
@@ -352,6 +354,10 @@ class RaftMachineTest : FunSpec({
         }
         test("Test linearaizability of client commands").config(timeout = 30.seconds) {
             resourceScope {
+                // C clients sending B batches of M messages each
+                val C = 8
+                val M = 15
+
                 val clusterNetwork = installRaftClusterNetwork()
                 val cluster = installRaftTestCluster(
                     network = clusterNetwork,
@@ -369,9 +375,6 @@ class RaftMachineTest : FunSpec({
                 )
                 val client = RaftClusterClient(clusterNetwork, RaftClusterClient.Configuration(retry = 10))
                 logger.info("----- started -----")
-                // C clients sending B batches of M messages each
-                val C = 8
-                val M = 15
 
                 coroutineScope {
                     val clientsSendingEntriesJob = launch {

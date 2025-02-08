@@ -1,9 +1,7 @@
 package io.r.raft.machine.linearizability
 
 import io.r.raft.log.StateMachine
-import kotlinx.coroutines.CoroutineName
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
@@ -11,15 +9,15 @@ import kotlinx.coroutines.launch
 import java.util.concurrent.ConcurrentHashMap
 
 class IdempotentStateMachine<Cmd: StateMachine.Command>(
+    parent: CoroutineScope,
     private val stateMachine: StateMachine<Cmd>
-) : StateMachine<Cmd> by stateMachine, CoroutineScope, AutoCloseable {
+) : StateMachine<Cmd> by stateMachine {
 
-    override val coroutineContext = SupervisorJob() + CoroutineName("IdempotentStateMachine")
     private class Entry(val sequence: Long, val result: ByteArray, val expiration: Long)
     private val cache = ConcurrentHashMap<String, Entry>()
 
     init {
-        CoroutineScope(coroutineContext).launch {
+        parent.launch {
             while (isActive) {
                 cache.entries.removeIf { (_, entry) -> entry.expiration < System.currentTimeMillis() }
                 delay(60000)
@@ -44,9 +42,5 @@ class IdempotentStateMachine<Cmd: StateMachine.Command>(
                 }
             }
 
-    }
-
-    override fun close() {
-        coroutineContext.cancel()
     }
 }

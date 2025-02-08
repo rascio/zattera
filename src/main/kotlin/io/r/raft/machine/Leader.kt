@@ -1,8 +1,10 @@
 package io.r.raft.machine
 
 import io.r.raft.log.RaftLog
+import io.r.raft.log.RaftLog.Companion.getLastMetadata
 import io.r.raft.machine.RaftMachine.Companion.DIAGNOSTIC_MARKER
 import io.r.raft.protocol.Index
+import io.r.raft.protocol.LogEntry
 import io.r.raft.protocol.LogEntryMetadata
 import io.r.raft.protocol.NodeId
 import io.r.raft.protocol.RaftMessage
@@ -44,6 +46,18 @@ class Leader(
         peers += cluster.peers
             .associateWith { PeerState(log.getLastIndex() + 1, 0) }
         val cont = peers.map { CompletableDeferred<Unit>() }
+
+        log.append(
+            log.getLastMetadata(),
+            entries = listOf(
+                LogEntry(
+                    term = log.getTerm(),
+                    entry = LogEntry.NoOp,
+                    id = "${cluster.id}-NOOP"
+                )
+            )
+        )
+
         heartbeat = scope.launch {
             cluster.peers.forEachIndexed { idx, peer ->
                 launch(CoroutineName("Heartbeat-$peer")) {

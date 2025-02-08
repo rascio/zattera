@@ -10,6 +10,7 @@ import io.r.raft.protocol.RaftMessage
 import io.r.raft.protocol.RaftRole
 import io.r.raft.transport.RaftCluster
 import io.r.toHex
+import io.r.utils.encodeBase64
 import io.r.utils.logs.entry
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineName
@@ -45,7 +46,8 @@ class RaftMachine<Cmd : StateMachine.Command>(
     private val input: Channel<RaftMessage> = Channel(capacity = Channel.BUFFERED)
 ) {
 
-    private val stateMachine = IdempotentStateMachine(stateMachine)
+    private val stateMachine = IdempotentStateMachine(scope, stateMachine)
+
     /*
      * This class is used to keep track of the client requests
      */
@@ -79,7 +81,6 @@ class RaftMachine<Cmd : StateMachine.Command>(
      */
     private val waitingForCommit = ConcurrentHashMap<String, CompletableDeferred<Response>>()
 
-    val commandSerializer = stateMachine.commandMessageDeserializer()
     val id get() = cluster.id
     val serverState get() = _role.value.serverState
     val role: Flow<RaftRole>
@@ -141,15 +142,7 @@ class RaftMachine<Cmd : StateMachine.Command>(
      */
     suspend fun command(cmd: LogEntry.Entry): Response {
         if (cmd is LogEntry.ClientCommand) {
-            runCatching {
-                requireNotNull(
-                    Json.decodeFromString(
-                        deserializer = stateMachine.commandMessageDeserializer(),
-                        string = cmd.bytes.decodeToString()
-                    )
-                )
-            }.onFailure { logger.error(cmd.bytes.decodeToString()) }
-                .getOrThrow()
+            requireIsDeserializable(cmd)
         }
         val payload = Json.encodeToString(cmd)
             .encodeToByteArray()
@@ -281,9 +274,13 @@ class RaftMachine<Cmd : StateMachine.Command>(
                         cluster.changeConfiguration(it.entry)
                         "true".encodeToByteArray()
                     }
+
+                    is LogEntry.NoOp -> null
                 }
+
                 serverState.lastApplied++
-                releaseCommit(it, result)
+
+                if (result != null) releaseCommit(it, result)
             }
         }
     }
@@ -298,7 +295,6 @@ class RaftMachine<Cmd : StateMachine.Command>(
             cancel("Stopping RaftMachine")
             join()
         }
-        stateMachine.close()
     }
 
     private suspend fun transitionTo(newRole: RaftRole): Role {
@@ -357,6 +353,28 @@ class RaftMachine<Cmd : StateMachine.Command>(
         scope,
         configuration
     )
+
+    private fun requireIsDeserializable(cmd: LogEntry.ClientCommand) {
+        try {
+            Json.decodeFromString(
+                deserializer = stateMachine.commandMessageDeserializer(),
+                string = cmd.bytes.decodeToString()
+            )
+        } catch (e: Exception) {
+            logger.warn {
+                entry(
+                    "Invalid_Command",
+                    "command" to cmd.bytes.encodeBase64()
+                )
+            }
+            throw IllegalArgumentException(
+                "Invalid command " +
+                    "stateMachine=${stateMachine::class.qualifiedName} " +
+                    "command=${cmd.bytes.encodeBase64()}",
+                e
+            )
+        }
+    }
 
     companion object {
         val DIAGNOSTIC_MARKER = MarkerManager.getMarker("RAFT_DIAGNOSTIC")

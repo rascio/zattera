@@ -53,6 +53,8 @@ private val logEntries = LogEntry.Entry::class
                     )
             )
 
+            LogEntry.NoOp::class -> listOf(LogEntry.NoOp)
+
             else -> error("Unknown type")
         }
     }

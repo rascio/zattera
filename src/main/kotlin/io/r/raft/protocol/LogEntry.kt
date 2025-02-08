@@ -37,7 +37,7 @@ data class LogEntry(
         }
 
         override fun toString(): String {
-            return "ClientCommand($hash|${bytes.encodeBase64()})"
+            return "ClientCommand($hash})"
         }
 
         override fun hashCode(): Int {
@@ -49,16 +49,7 @@ data class LogEntry(
         val new: List<RaftRpc.ClusterNode>,
         val old: List<RaftRpc.ClusterNode>? = null
     ) : Entry
+    @Serializable
+    data object NoOp : Entry
 
-}
-
-fun main() {
-    val clientCommand = LogEntry.ClientCommand("Hello, World!".toByteArray())
-    val string = Json.encodeToString(
-        clientCommand as LogEntry.Entry
-    )
-    println(string)
-    val decoded = Json.decodeFromString<LogEntry.Entry>(string)
-    println(decoded)
-    check(clientCommand == decoded)
 }

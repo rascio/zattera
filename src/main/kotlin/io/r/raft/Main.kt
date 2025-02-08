@@ -1,3 +1,5 @@
+@file:JacocoExclusionNeedsGenerated
+
 package io.r.raft
 
 import arrow.atomic.AtomicLong
@@ -24,6 +26,7 @@ import io.r.raft.protocol.toClusterNode
 import io.r.raft.transport.RaftCluster
 import io.r.raft.transport.ktor.HttpRaftCluster
 import io.r.raft.transport.ktor.HttpRaftController
+import io.r.utils.JacocoExclusionNeedsGenerated
 import io.r.utils.logs.entry
 import kotlinx.coroutines.CoroutineName
 import kotlinx.coroutines.CoroutineScope
@@ -56,6 +59,7 @@ fun main(args: Array<String>) {
         - GET /entries to get all entries
     """,
 )
+@JacocoExclusionNeedsGenerated
 class RestRaftServer : Callable<String> {
 
     private val logger = LogManager.getLogger(RestRaftServer::class.java)
@@ -98,8 +102,8 @@ class RestRaftServer : Callable<String> {
     private var leaderJitter: Long = 100
 
     @Option(
-        names = ["--debug-messages"],
-        description = ["Enable debug logs"],
+        names = ["--debug"],
+        description = ["Enable debug logs, use -DlogLevel=DEBUG for all logs"],
         required = false
     )
     private var debugMessages: Boolean = false
@@ -113,6 +117,9 @@ class RestRaftServer : Callable<String> {
     private var stateMachine: String = SimpleCounter::class.qualifiedName!!
 
     override fun call(): String {
+        if (debugMessages && "logLevel" !in System.getProperties()) {
+            System.setProperty("logLevel", "INFO")
+        }
         logger.info(entry("Starting server", "id" to id, "port" to port))
         runBlocking(Dispatchers.IO + CoroutineName("Server")) {
             resourceScope {
@@ -223,6 +230,8 @@ class RestRaftServer : Callable<String> {
     }
 }
 
+
+@JacocoExclusionNeedsGenerated
 @Serializable
 data object Inc : StateMachine.Command
 class SimpleCounter : StateMachine<Inc>{
@@ -245,5 +254,5 @@ class SimpleCounter : StateMachine<Inc>{
 
 private fun LogEntry.Entry.describe() = when (this) {
     is LogEntry.ClientCommand -> bytes.decodeToString()
-    is LogEntry.ConfigurationChange -> toString()
+    else -> toString()
 }
