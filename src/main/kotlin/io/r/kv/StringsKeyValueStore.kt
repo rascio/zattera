@@ -1,20 +1,23 @@
 package io.r.kv
 
+import io.r.kv.StringsKeyValueStore.KVCommand
 import io.r.raft.log.StateMachine
-import io.r.raft.protocol.LogEntry
-import io.r.utils.decodeToString
+import io.r.raft.log.StateMachine.Message
+import kotlinx.serialization.KSerializer
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import org.apache.logging.log4j.LogManager
 
-class StringsKeyValueStore : StateMachine {
+class StringsKeyValueStore : StateMachine<KVCommand> {
 
     private val store = mutableMapOf<String, String>()
 
-    override suspend fun apply(command: LogEntry): ByteArray {
-        val request = Json.decodeFromString<Request>(command.entry.decodeToString())
+    override val commandSerializer = KVCommand.serializer()
+
+    override suspend fun apply(message: Message<KVCommand>): ByteArray {
+        val request = message.payload
         return Json.encodeToString(handle(request))
             .encodeToByteArray()
     }
@@ -52,12 +55,16 @@ class StringsKeyValueStore : StateMachine {
         }
     }
 
+
     @Serializable
     sealed interface Request
     @Serializable
+    sealed interface KVCommand : StateMachine.Command, Request
+
+    @Serializable
     data class Get(val key: String) : Request
     @Serializable
-    data class Set(val key: String, val value: String) : Request
+    data class Set(val key: String, val value: String) : KVCommand
     @Serializable
     data class Delete(val key: String) : Request
 

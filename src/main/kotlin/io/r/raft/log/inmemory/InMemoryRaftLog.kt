@@ -21,7 +21,6 @@ class InMemoryRaftLog(
     votedFor: NodeId? = null
 ) : RaftLog {
 
-    private val lock = ReadWriteLock()
 
     private val log: NavigableMap<Index, LogEntry> = TreeMap(log).apply {
         put(0, ROOT_ENTRY)
@@ -29,7 +28,7 @@ class InMemoryRaftLog(
     private val term = AtomicRef(term)
     private val votedFor = AtomicRef(votedFor)
 
-    override suspend fun getLastIndex(): Index = lock.withReadLock {
+    override suspend fun getLastIndex(): Index {
         return getLastIndexInternal()
     }
 
@@ -42,7 +41,7 @@ class InMemoryRaftLog(
         votedFor.set(null)
     }
 
-    override suspend fun getMetadata(index: Index): LogEntryMetadata? = lock.withReadLock {
+    override suspend fun getMetadata(index: Index): LogEntryMetadata? {
         return when {
             index == 0L -> LogEntryMetadata.ZERO
             else -> log[index]?.let { (term, _) -> LogEntryMetadata(index, term) }
@@ -53,18 +52,18 @@ class InMemoryRaftLog(
         }
     }
 
-    override suspend fun getEntries(from: Index, length: Int): List<LogEntry> = lock.withReadLock {
+    override suspend fun getEntries(from: Index, length: Int): List<LogEntry> {
         return log.subMap(from, true, from + length, false)
             .values
             .toList()
     }
 
 
-    override suspend fun append(previous: LogEntryMetadata, entries: List<LogEntry>): AppendResult = lock.withWriteLock {
+    override suspend fun append(previous: LogEntryMetadata, entries: List<LogEntry>): AppendResult {
         val stored = log[previous.index]
         when {
-            stored == null -> AppendResult.IndexNotFound
-            stored.term != previous.term -> AppendResult.EntryMismatch
+            stored == null -> return AppendResult.IndexNotFound
+            stored.term != previous.term -> return AppendResult.EntryMismatch
             else -> {
                 entries.forEachIndexed { i, entry ->
                     log[previous.index + i + 1] = entry
@@ -72,7 +71,7 @@ class InMemoryRaftLog(
                 if (previous.index + entries.size < getLastIndexInternal()) {
                     log.tailMap(previous.index + entries.size, false).clear()
                 }
-                AppendResult.Appended(getLastIndexInternal())
+                return AppendResult.Appended(getLastIndexInternal())
             }
         }
     }
@@ -89,6 +88,6 @@ class InMemoryRaftLog(
 
     companion object {
         private val logger: Logger = LogManager.getLogger(InMemoryRaftLog::class.java)
-        private val ROOT_ENTRY = LogEntry(0, LogEntry.ClientCommand(byteArrayOf()))
+        private val ROOT_ENTRY = LogEntry(0, LogEntry.ClientCommand(byteArrayOf()), "root")
     }
 }

@@ -3,10 +3,13 @@ package io.r.raft.machine
 import io.r.raft.log.RaftLog
 import io.r.raft.log.RaftLog.Companion.getLastMetadata
 import io.r.raft.log.StateMachine
+import io.r.raft.log.StateMachine.Companion.commandMessageDeserializer
+import io.r.raft.machine.linearizability.IdempotentStateMachine
 import io.r.raft.protocol.LogEntry
 import io.r.raft.protocol.RaftMessage
 import io.r.raft.protocol.RaftRole
 import io.r.raft.transport.RaftCluster
+import io.r.toHex
 import io.r.utils.logs.entry
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineName
@@ -25,28 +28,31 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.selects.onTimeout
 import kotlinx.coroutines.selects.select
 import kotlinx.coroutines.withTimeout
+import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.Json
+import org.apache.commons.codec.digest.MurmurHash3
 import org.apache.logging.log4j.LogManager
 import org.apache.logging.log4j.Logger
 import org.apache.logging.log4j.MarkerManager
-import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 
-class RaftMachine(
+class RaftMachine<Cmd : StateMachine.Command>(
     private val configuration: Configuration,
     private val cluster: RaftCluster,
     private val log: RaftLog,
-    private val stateMachine: StateMachine,
+    stateMachine: StateMachine<Cmd>,
     private val scope: CoroutineScope = CoroutineScope(Dispatchers.IO),
     private val input: Channel<RaftMessage> = Channel(capacity = Channel.BUFFERED)
 ) {
 
+    private val stateMachine = IdempotentStateMachine(stateMachine)
     /*
      * This class is used to keep track of the client requests
      */
     private class IncomingRequest<E>(
         val entry: E,
         val response: CompletableDeferred<Response>,
-        val id: String = UUID.randomUUID().toString()
+        val id: String
     )
 
     private val logger: Logger = LogManager.getLogger("${this::class.qualifiedName}.${cluster.id}")
@@ -54,10 +60,12 @@ class RaftMachine(
     private val _role: MutableStateFlow<Role> = MutableStateFlow(
         createFollower(ServerState(0, 0))
     )
+
     /*
      * This job is used to run the main loop of the raft machine
      */
     private var job: Job? = null
+
     /*
      * This channel is used to receive client requests
      */
@@ -71,6 +79,7 @@ class RaftMachine(
      */
     private val waitingForCommit = ConcurrentHashMap<String, CompletableDeferred<Response>>()
 
+    val commandSerializer = stateMachine.commandMessageDeserializer()
     val id get() = cluster.id
     val serverState get() = _role.value.serverState
     val role: Flow<RaftRole>
@@ -101,7 +110,9 @@ class RaftMachine(
                                 log.setTerm(message.rpc.term)
                                 transitionTo(RaftRole.FOLLOWER)
                             }
+
                             _role.value.onReceivedMessage(message)
+
                         }
                         onTimeout(_role.value.timeout) {
                             logger.debug(entry("Timeout", "role" to _role.value::class.simpleName))
@@ -128,22 +139,33 @@ class RaftMachine(
     /**
      * Execute a command in the state machine
      */
-    @OptIn(ExperimentalStdlibApi::class)
     suspend fun command(cmd: LogEntry.Entry): Response {
-        val entry = IncomingRequest(
+        if (cmd is LogEntry.ClientCommand) {
+            runCatching {
+                requireNotNull(
+                    Json.decodeFromString(
+                        deserializer = stateMachine.commandMessageDeserializer(),
+                        string = cmd.bytes.decodeToString()
+                    )
+                )
+            }.onFailure { logger.error(cmd.bytes.decodeToString()) }
+                .getOrThrow()
+        }
+        val payload = Json.encodeToString(cmd)
+            .encodeToByteArray()
+        val request = IncomingRequest(
+            id = MurmurHash3.hash128x64(payload).toHex(),
             entry = cmd,
-            response = CompletableDeferred(),
-            id = cmd.hashCode().toHexString()
+            response = CompletableDeferred()
         )
-        incomingCommands.send(entry)
+        incomingCommands.send(request)
         logger.info {
             entry(
                 "request_sent",
-                "id" to entry.id,
-                "req" to cmd
+                "request" to cmd
             )
         }
-        return entry.response.await()
+        return request.response.await()
     }
 
     /**
@@ -157,6 +179,7 @@ class RaftMachine(
                 }
                 Response.Success(stateMachine.read(query))
             }
+
             else -> {
                 when (val leader = serverState.leader) {
                     null -> Response.LeaderUnknown
@@ -237,9 +260,23 @@ class RaftMachine(
                     )
                 }
                 val result = when (it.entry) {
-                    is LogEntry.ClientCommand -> stateMachine.apply(it).also { b ->
-                        logger.info(entry("Applied", "response" to b.decodeToString()))
+                    is LogEntry.ClientCommand -> {
+                        val cmd = Json.decodeFromString(
+                            deserializer = stateMachine.commandMessageDeserializer(),
+                            string = it.entry.bytes.decodeToString()
+                        )
+                        stateMachine.apply(cmd).also {
+                            logger.info {
+                                entry(
+                                    "Applied",
+                                    "client_id" to cmd.clientId,
+                                    "id" to cmd.sequence,
+                                    "result" to it.decodeToString()
+                                )
+                            }
+                        }
                     }
+
                     is LogEntry.ConfigurationChange -> {
                         cluster.changeConfiguration(it.entry)
                         "true".encodeToByteArray()
@@ -261,6 +298,7 @@ class RaftMachine(
             cancel("Stopping RaftMachine")
             join()
         }
+        stateMachine.close()
     }
 
     private suspend fun transitionTo(newRole: RaftRole): Role {
@@ -270,7 +308,7 @@ class RaftMachine(
             RaftRole.CANDIDATE -> createCandidate()
             RaftRole.LEADER -> createLeader()
         }
-        logger.info(entry("role_change", "to" to newRole, "term" to log.getTerm()))
+        logger.info(entry("role_change", "to" to _role.value::class.simpleName, "term" to log.getTerm()))
         _role.value.onEnter()
         return _role.value
     }
@@ -322,5 +360,6 @@ class RaftMachine(
 
     companion object {
         val DIAGNOSTIC_MARKER = MarkerManager.getMarker("RAFT_DIAGNOSTIC")
+
     }
 }

@@ -20,7 +20,8 @@ class RaftClusterClient(
 
     data class Configuration(
         val retry: Int = 3,
-        val delay: LongRange = 50L..100
+        val delay: LongRange = 50L..100,
+        val jitter: LongRange = 0L..30
     )
 
     private var leader: NodeId? = null
@@ -41,7 +42,7 @@ class RaftClusterClient(
             when (val response = exec(node)) {
                 Response.LeaderUnknown -> {
                     logger.debug { entry("leader_unknown", "node" to node.id) }
-                    delay(Random.nextLong(configuration.delay.first, configuration.delay.last))
+                    delay(configuration.delay.random())
                     send(retry - 1, exec)
                 }
 
@@ -60,6 +61,7 @@ class RaftClusterClient(
             changeNode()
             if (retry > 0) {
                 logger.debug(e) { entry("client_retry", "node" to node.id) }
+                delay(configuration.delay.random())
                 send(retry - 1, exec)
             } else {
                 throw e

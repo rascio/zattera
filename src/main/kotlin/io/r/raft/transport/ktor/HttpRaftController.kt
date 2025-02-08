@@ -17,7 +17,7 @@ import org.apache.logging.log4j.LogManager
 import org.apache.logging.log4j.Logger
 
 class HttpRaftController(
-    private val raftMachine: RaftMachine,
+    private val raftMachine: RaftMachine<*>,
     private val debugMessages: Boolean = false
 ) {
 

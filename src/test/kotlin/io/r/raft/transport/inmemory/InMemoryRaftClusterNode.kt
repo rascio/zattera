@@ -35,7 +35,7 @@ class InMemoryRaftClusterNode(
         /**
          * Make the [RaftTestNode] receive a message from the [RaftCluster]
          */
-        suspend inline fun InMemoryRaftClusterNode.sendTo(to: RaftTestNode, rpc: () -> RaftRpc) {
+        suspend inline fun InMemoryRaftClusterNode.sendTo(to: RaftTestNode<*>, rpc: () -> RaftRpc) {
             network.send(RaftMessage(from = node.id, to = to.id, rpc = rpc()))
         }
 

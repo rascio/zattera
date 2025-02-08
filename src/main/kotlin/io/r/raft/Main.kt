@@ -12,10 +12,8 @@ import io.ktor.server.engine.embeddedServer
 import io.ktor.server.netty.Netty
 import io.ktor.server.plugins.cors.routing.CORS
 import io.ktor.server.plugins.statuspages.StatusPages
-import io.ktor.server.request.receive
 import io.ktor.server.response.respondText
 import io.ktor.server.routing.get
-import io.ktor.server.routing.post
 import io.ktor.server.routing.route
 import io.ktor.server.routing.routing
 import io.r.raft.log.StateMachine
@@ -31,8 +29,8 @@ import kotlinx.coroutines.CoroutineName
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.runBlocking
-import kotlinx.serialization.encodeToString
-import kotlinx.serialization.json.Json
+import kotlinx.serialization.KSerializer
+import kotlinx.serialization.Serializable
 import org.apache.logging.log4j.LogManager
 import picocli.CommandLine
 import picocli.CommandLine.Command
@@ -137,7 +135,6 @@ class RestRaftServer : Callable<String> {
         )
         val http = installHttpServer(
             raftClusterNode = HttpRaftController(raftMachine, debugMessages = debugMessages),
-            raftMachine = raftMachine,
             raftLog = raftLog
         )
         logger.info(entry("Server_started", "id" to id, "port" to port))
@@ -153,7 +150,6 @@ class RestRaftServer : Callable<String> {
 
     private suspend fun ResourceScope.installHttpServer(
         raftClusterNode: HttpRaftController,
-        raftMachine: RaftMachine,
         raftLog: InMemoryRaftLog
     ) = install(
         acquire = {
@@ -169,7 +165,7 @@ class RestRaftServer : Callable<String> {
                         )
                     }
                 }
-                installRoutes(raftClusterNode, raftMachine, raftLog)
+                installRoutes(raftClusterNode, raftLog)
             }
         },
         release = { it, _ -> it.stop() }
@@ -177,7 +173,6 @@ class RestRaftServer : Callable<String> {
 
     private fun Application.installRoutes(
         raftClusterNode: HttpRaftController,
-        raft: RaftMachine,
         raftLog: InMemoryRaftLog
     ) {
         routing {
@@ -186,12 +181,6 @@ class RestRaftServer : Callable<String> {
             }
             route("/raft", raftClusterNode.endpoints)
             route("/entries") {
-                post {
-                    val entry = call.receive<ByteArray>()
-                    val result = raft.command(LogEntry.ClientCommand(entry))
-                    val response = Json.encodeToString(result)
-                    call.respondText(response)
-                }
                 get {
                     raftLog.getEntries(0, Int.MAX_VALUE)
                         .joinToString("\n") { it.entry.describe() }
@@ -224,23 +213,27 @@ class RestRaftServer : Callable<String> {
         release = { it, _ -> it.stop() }
     )
 
-    private fun newStateMachine() : StateMachine {
+    private fun newStateMachine() : StateMachine<*> {
         val clazz = Class.forName(stateMachine)
         require(StateMachine::class.java.isAssignableFrom(clazz)) {
             "State machine must implement the StateMachine interface"
         }
         val constructor = clazz.getConstructor()
-        return constructor.newInstance() as StateMachine
+        return constructor.newInstance() as StateMachine<*>
     }
 }
 
-class SimpleCounter : StateMachine{
+@Serializable
+data object Inc : StateMachine.Command
+class SimpleCounter : StateMachine<Inc>{
 
     private val lastApplied = AtomicLong()
 
-    override suspend fun apply(command: LogEntry): ByteArray {
+    override val commandSerializer = Inc.serializer()
+
+    override suspend fun apply(message: StateMachine.Message<Inc>): ByteArray {
         // Do nothing for now
-        logger.info(entry("Applied", "command" to command.entry.describe()))
+        logger.info(entry("Applied", "message" to message))
         return "ADDED_${lastApplied.incrementAndGet()}"
             .encodeToByteArray()
     }

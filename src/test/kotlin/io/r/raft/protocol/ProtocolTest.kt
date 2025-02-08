@@ -59,7 +59,8 @@ private val logEntries = LogEntry.Entry::class
     .map {
         LogEntry(
             term = Random.nextLong(0, 100),
-            entry = it
+            entry = it,
+            id = randomAlphabetic()
         )
     }
 
@@ -113,6 +114,6 @@ private fun generateMessages() = RaftRpc::class
         )
     }
 
-private fun randomAlphabetic() = (0..Random.nextInt(until = 16))
+fun randomAlphabetic() = (0..Random.nextInt(until = 16))
     .map { Random.nextInt(from = 'A'.code, until = 'Z'.code).toChar() }
     .joinToString("")
