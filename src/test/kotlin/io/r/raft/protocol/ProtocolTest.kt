@@ -42,7 +42,8 @@ private val logEntries = LogEntry.Entry::class
         when (type) {
             LogEntry.ClientCommand::class -> listOf(
                     LogEntry.ClientCommand(
-                        bytes = randomAlphabetic().encodeToByteArray()
+                        bytes = randomAlphabetic().encodeToByteArray(),
+                        id = randomAlphabetic()
                     )
             )
 

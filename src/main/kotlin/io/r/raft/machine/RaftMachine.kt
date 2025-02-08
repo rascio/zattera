@@ -9,11 +9,12 @@ import io.r.raft.protocol.LogEntry
 import io.r.raft.protocol.RaftMessage
 import io.r.raft.protocol.RaftRole
 import io.r.raft.transport.RaftCluster
-import io.r.toHex
+import io.r.utils.toHex
 import io.r.utils.encodeBase64
+import io.r.utils.loggingCtx
 import io.r.utils.logs.entry
+import io.r.utils.murmur128
 import kotlinx.coroutines.CompletableDeferred
-import kotlinx.coroutines.CoroutineName
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -31,10 +32,11 @@ import kotlinx.coroutines.selects.select
 import kotlinx.coroutines.withTimeout
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
-import org.apache.commons.codec.digest.MurmurHash3
 import org.apache.logging.log4j.LogManager
 import org.apache.logging.log4j.Logger
 import org.apache.logging.log4j.MarkerManager
+import org.apache.logging.log4j.kotlin.additionalLoggingContext
+import org.apache.logging.log4j.kotlin.logger
 import java.util.concurrent.ConcurrentHashMap
 
 class RaftMachine<Cmd : StateMachine.Command>(
@@ -57,7 +59,6 @@ class RaftMachine<Cmd : StateMachine.Command>(
         val id: String
     )
 
-    private val logger: Logger = LogManager.getLogger("${this::class.qualifiedName}.${cluster.id}")
 
     private val _role: MutableStateFlow<Role> = MutableStateFlow(
         createFollower(ServerState(0, 0))
@@ -95,7 +96,7 @@ class RaftMachine<Cmd : StateMachine.Command>(
     @OptIn(ExperimentalCoroutinesApi::class)
     fun start() {
         logger.info(entry("Starting_RaftMachine", "job" to job))
-        job = scope.launch(CoroutineName(cluster.id)) {
+        job = scope.launch(additionalLoggingContext(map = mapOf("NodeId" to cluster.id))) {
             transitionTo(RaftRole.FOLLOWER)
             try {
                 logger.debug("RaftMachine_Started")
@@ -120,7 +121,9 @@ class RaftMachine<Cmd : StateMachine.Command>(
                             _role.value.onTimeout()
                         }
                         incomingCommands.onReceive { command ->
-                            handleClientCommand(command)
+                            loggingCtx("cmd=${command.id}") {
+                                handleClientCommand(command)
+                            }
                         }
                     }
                 }
@@ -140,25 +143,31 @@ class RaftMachine<Cmd : StateMachine.Command>(
     /**
      * Execute a command in the state machine
      */
-    suspend fun command(cmd: LogEntry.Entry): Response {
+    suspend fun command(cmd: LogEntry.Entry): Response = loggingCtx(mapOf("NodeId" to cluster.id)) {
         if (cmd is LogEntry.ClientCommand) {
-            requireIsDeserializable(cmd)
+            requireIsKnownCommand(cmd)
         }
         val payload = Json.encodeToString(cmd)
             .encodeToByteArray()
+        if (cmd is LogEntry.ClientCommand) {
+            logger.info {
+                entry("tracking", "cmd" to cmd.bytes.decodeToString(), "id" to payload.murmur128().toHex())
+            }
+        }
         val request = IncomingRequest(
-            id = MurmurHash3.hash128x64(payload).toHex(),
+            id = cmd.id,
             entry = cmd,
             response = CompletableDeferred()
         )
         incomingCommands.send(request)
         logger.info {
             entry(
-                "request_sent",
-                "request" to cmd
+                "request_pending",
+                "id" to request.id,
+                "command" to cmd
             )
         }
-        return request.response.await()
+        request.response.await()
     }
 
     /**
@@ -204,6 +213,9 @@ class RaftMachine<Cmd : StateMachine.Command>(
                     // cancel the timeout if the command is completed
                     request.response.invokeOnCompletion { cancel() }
                     delay(configuration.pendingCommandsTimeout)
+                    logger.warn {
+                        entry("Command_Timeout", "id" to request.id)
+                    }
                     // on timeout, remove and cancel from waiting queue
                     waitingForCommit.remove(entry.id)
                         ?.cancel("Time out")
@@ -222,16 +234,17 @@ class RaftMachine<Cmd : StateMachine.Command>(
     }
 
     private fun releaseCommit(entry: LogEntry, result: ByteArray) {
-        waitingForCommit.remove(entry.id)?.apply {
-            logger.debug {
-                entry(
-                    "Releasing_Commit",
-                    "entry" to entry.id,
-                    "result" to result.decodeToString()
-                )
+        waitingForCommit.remove(entry.id)
+            ?.apply {
+                logger.info {
+                    entry(
+                        "Releasing_Commit",
+                        "entry" to entry.id,
+                        "result" to result.decodeToString()
+                    )
+                }
+                complete(Response.Success(result))
             }
-            complete(Response.Success(result))
-        }
     }
 
     private suspend fun applyCommittedEntries() {
@@ -243,44 +256,39 @@ class RaftMachine<Cmd : StateMachine.Command>(
                 length = (serverState.commitIndex - lastApplied).toInt()
             )
             entries.forEach {
-                logger.debug {
-                    entry(
-                        "Applying_Committed",
-                        "entry" to it.id,
-                        "index" to lastApplied + 1,
-                        "commit_index" to serverState.commitIndex,
-                        "client_handle" to waitingForCommit.contains(it.id)
-                    )
-                }
-                val result = when (it.entry) {
-                    is LogEntry.ClientCommand -> {
-                        val cmd = Json.decodeFromString(
-                            deserializer = stateMachine.commandMessageDeserializer(),
-                            string = it.entry.bytes.decodeToString()
+                loggingCtx(it.id) {
+                    logger.debug {
+                        entry(
+                            "Applying_Committed",
+                            "index" to serverState.lastApplied + 1,
+                            "commit_index" to serverState.commitIndex,
+                            "client_handle" to waitingForCommit.contains(it.id)
                         )
-                        stateMachine.apply(cmd).also {
-                            logger.info {
-                                entry(
-                                    "Applied",
-                                    "client_id" to cmd.clientId,
-                                    "id" to cmd.sequence,
-                                    "result" to it.decodeToString()
-                                )
-                            }
+                    }
+                    val result = when (it.entry) {
+                        is LogEntry.ClientCommand -> {
+                            val cmd = Json.decodeFromString(
+                                deserializer = stateMachine.commandMessageDeserializer(),
+                                string = it.entry.bytes.decodeToString()
+                            )
+                            stateMachine.apply(cmd)
+                                .also {
+                                    logger.info { entry("Applied", "result" to it.decodeToString()) }
+                                }
                         }
+
+                        is LogEntry.ConfigurationChange -> {
+                            cluster.changeConfiguration(it.entry)
+                            "true".encodeToByteArray()
+                        }
+
+                        is LogEntry.NoOp -> null
                     }
 
-                    is LogEntry.ConfigurationChange -> {
-                        cluster.changeConfiguration(it.entry)
-                        "true".encodeToByteArray()
-                    }
+                    serverState.lastApplied++
 
-                    is LogEntry.NoOp -> null
+                    if (result != null) releaseCommit(it, result)
                 }
-
-                serverState.lastApplied++
-
-                if (result != null) releaseCommit(it, result)
             }
         }
     }
@@ -354,7 +362,7 @@ class RaftMachine<Cmd : StateMachine.Command>(
         configuration
     )
 
-    private fun requireIsDeserializable(cmd: LogEntry.ClientCommand) {
+    private fun requireIsKnownCommand(cmd: LogEntry.ClientCommand) {
         try {
             Json.decodeFromString(
                 deserializer = stateMachine.commandMessageDeserializer(),
@@ -378,6 +386,7 @@ class RaftMachine<Cmd : StateMachine.Command>(
 
     companion object {
         val DIAGNOSTIC_MARKER = MarkerManager.getMarker("RAFT_DIAGNOSTIC")
+        private val logger: Logger = LogManager.getLogger(RaftMachine::class.java)
 
     }
 }

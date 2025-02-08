@@ -14,7 +14,8 @@ import io.r.raft.protocol.RaftRpc
 import io.r.raft.transport.Query
 import io.r.raft.transport.RaftService
 import io.r.utils.logs.entry
-import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
@@ -26,15 +27,15 @@ class HttpRaftService(
 ) : RaftService, AutoCloseable {
 
     private val json = Json
-
     private var connected = true
 
     override suspend fun send(message: RaftMessage) {
         runCatching {
-            withTimeout(5000) {
-                val response = client.post("http://${node.host}:${node.port}/raft/${message.from}/rpc") {
-                    contentType(ContentType.Application.Json)
-                    setBody(json.encodeToString(message.rpc))
+                val response = withContext(Dispatchers.IO) {
+                    client.post("http://${node.host}:${node.port}/raft/${message.from}/rpc") {
+                        contentType(ContentType.Application.Json)
+                        setBody(json.encodeToString(message.rpc))
+                    }
                 }
                 if (response.status != HttpStatusCode.Accepted) {
                     logger.warn(
@@ -48,7 +49,6 @@ class HttpRaftService(
                 } else {
                     connected = true
                 }
-            }
         }.onFailure { e ->
             if (connected) {
                 logger.warn(
@@ -65,9 +65,11 @@ class HttpRaftService(
     }
 
     override suspend fun request(entry: LogEntry.Entry): Response {
-        val response = client.post("http://${node.host}:${node.port}/raft/request") {
-            contentType(ContentType.Application.Json)
-            setBody(json.encodeToString(entry))
+        val response = withContext(Dispatchers.IO) {
+            client.post("http://${node.host}:${node.port}/raft/request") {
+                contentType(ContentType.Application.Json)
+                setBody(json.encodeToString(entry))
+            }
         }
         if (response.status != HttpStatusCode.OK) {
             logger.warn(entry("forwarding_failure", "to" to node.id, "entry" to entry, "status" to response.status))
@@ -80,9 +82,11 @@ class HttpRaftService(
     }
 
     override suspend fun query(query: Query): Response {
-        val response = client.post("http://${node.host}:${node.port}/raft/query") {
-            contentType(ContentType.Application.Json)
-            setBody(query)
+        val response = withContext(Dispatchers.IO) {
+            client.post("http://${node.host}:${node.port}/raft/query") {
+                contentType(ContentType.Application.Json)
+                setBody(query)
+            }
         }
         if (response.status != HttpStatusCode.OK) {
             logger.warn(entry("forwarding_failure", "to" to node.id, "query" to query, "status" to response.status))

@@ -55,11 +55,10 @@ class HttpRaftController(
         }
         post("/query") {
             val payload = call.receiveText()
-                .encodeToByteArray()
             if (debugMessages) {
                 httpMessagesLogger.info("${raftMachine.id} <-- ?$payload -- ${raftMachine.id}")
             }
-            val res = raftMachine.query(payload)
+            val res = raftMachine.query(payload.encodeToByteArray())
             call.respondText(
                 text = Json.encodeToString(res),
                 status = HttpStatusCode.OK

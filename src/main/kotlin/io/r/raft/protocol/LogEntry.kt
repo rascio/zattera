@@ -1,13 +1,7 @@
 package io.r.raft.protocol
 
 import io.r.raft.transport.serialization.ByteArrayBase64Serializer
-import io.r.toHex
-import io.r.utils.encodeBase64
 import kotlinx.serialization.Serializable
-import kotlinx.serialization.decodeFromString
-import kotlinx.serialization.encodeToString
-import kotlinx.serialization.json.Json
-import org.apache.commons.codec.digest.MurmurHash3
 import java.util.UUID
 
 @Serializable
@@ -20,14 +14,15 @@ data class LogEntry(
     override fun toString(): String = "LogEntry(id=${id}, term=$term, c=${entry})"
 
     @Serializable
-    sealed interface Entry
+    sealed interface Entry {
+        val id: String
+    }
     @Serializable
     class ClientCommand(
         @Serializable(with = ByteArrayBase64Serializer::class)
-        val bytes: ByteArray
+        val bytes: ByteArray,
+        override val id: String
     ) : Entry {
-
-        private val hash by lazy { MurmurHash3.hash128x64(bytes).toHex() }
 
         override fun equals(other: Any?): Boolean {
             if (this === other) return true
@@ -37,7 +32,7 @@ data class LogEntry(
         }
 
         override fun toString(): String {
-            return "ClientCommand($hash})"
+            return "ClientCommand($id)"
         }
 
         override fun hashCode(): Int {
@@ -47,9 +42,12 @@ data class LogEntry(
     @Serializable
     data class ConfigurationChange(
         val new: List<RaftRpc.ClusterNode>,
-        val old: List<RaftRpc.ClusterNode>? = null
+        val old: List<RaftRpc.ClusterNode>? = null,
+        override val id: String = UUID.randomUUID().toString()
     ) : Entry
     @Serializable
-    data object NoOp : Entry
+    data object NoOp : Entry {
+        override val id: String = "NoOp"
+    }
 
 }

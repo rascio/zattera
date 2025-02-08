@@ -2,7 +2,6 @@ package io.r.raft.machine
 
 import arrow.fx.coroutines.ResourceScope
 import io.r.raft.log.StateMachine
-import io.r.raft.protocol.LogEntry
 import io.r.raft.protocol.NodeId
 import io.r.raft.test.installCoroutine
 import io.r.raft.transport.inmemory.RaftClusterTestNetwork
@@ -15,8 +14,6 @@ import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
-import kotlinx.serialization.encodeToString
-import kotlinx.serialization.json.Json
 import org.apache.logging.log4j.LogManager
 import org.apache.logging.log4j.Logger
 import org.apache.logging.log4j.kotlin.loggingContext
@@ -87,10 +84,9 @@ class RaftTestCluster<Cmd : StateMachine.Command>(
     suspend fun dumpRaftLogs(decode: Boolean = false) {
         nodes.forEach { node ->
             node.log.getEntries(1, Int.MAX_VALUE)
-                .joinToString("\n") { if (decode) "${it.id}|${it.term}|${it.entry.decodeToString()}" else it.toString() }
-                .let {
-                    logger.debug("Dump log for node ${node.id}\n$it")
-                }
+                .mapIndexed { index, it -> if (decode) "${index + 1}|${it.term}|${it.id}|${it.entry.decodeToString()}" else it.toString() }
+                .joinToString("\n")
+                .let { logger.info("Dump_log node=${node.id}\n$it\nEnd_Dump") }
         }
     }
 

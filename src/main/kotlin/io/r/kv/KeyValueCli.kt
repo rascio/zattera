@@ -5,8 +5,8 @@ package io.r.kv
 
 import arrow.fx.coroutines.autoCloseable
 import arrow.fx.coroutines.resourceScope
+import io.r.kv.StringsKeyValueStore.KVCommand
 import io.r.raft.client.RaftClusterClient
-import io.r.raft.protocol.LogEntry
 import io.r.raft.protocol.RaftRpc
 import io.r.raft.protocol.toClusterNode
 import io.r.raft.transport.ktor.HttpRaftCluster
@@ -18,7 +18,6 @@ import kotlinx.serialization.json.Json
 import picocli.CommandLine
 import picocli.CommandLine.Command
 import picocli.CommandLine.Option
-import picocli.CommandLine.Parameters
 import java.util.Scanner
 import java.util.concurrent.Callable
 import kotlin.system.exitProcess
@@ -36,9 +35,6 @@ fun main(args: Array<String>) {
     """,
     subcommands = [
         ShellCommand::class,
-        GetCommand::class,
-        SetCommand::class,
-        DeleteCommand::class
     ]
 )
 class KeyValueCli
@@ -52,6 +48,16 @@ class ShellCommand : Callable<Int> {
     @Option(names = ["--peer"], description = ["The host to connect to"], required = true)
     lateinit var peers: List<String>
 
+    @Option(names = ["--retry"], description = ["The number of retries"], defaultValue = "10")
+    var retry: Int = 10
+
+    @Option(names = ["--delay"], description = ["The delay between retries when no leader is available, should be in line with heartbeat"], defaultValue = "300")
+    var delay: Long = 300
+
+    @Option(names = ["--jitter"], description = ["The jitter to add to the delay, or when the server fails"], defaultValue = "50")
+    var jitter: Long = 50
+
+
     override fun call(): Int {
         runBlocking {
             resourceScope {
@@ -61,18 +67,25 @@ class ShellCommand : Callable<Int> {
                             .forEach { connect(it) }
                     }
                 }
-                val raftClient = RaftClusterClient(cluster)
+                val raftClient = RaftClusterClient(
+                    peers = cluster,
+                    commandSerializer = KVCommand.serializer(),
+                    configuration = RaftClusterClient.Configuration(
+                        retry = retry,
+                        delay = delay..(delay + jitter),
+                        jitter = 0L..jitter
+                    )
+                )
                 val scanner = Scanner(System.`in`)
                 println("Connected")
                 while (true) {
                     print("${raftClient.connected().describe()}> ")
-                    val entry = when (val request = scanner.nextCommand()) {
+                    val result = when (val request = scanner.nextCommand()) {
                         null -> continue
-                        else -> request.toClientCommand()
+                        is KVCommand -> sendCommand(raftClient, request)
+                        else -> sendQuery(raftClient, request)
                     }
-                    raftClient.request(entry)
-                        .recoverCatching { raftClient.request(entry).getOrThrow() }
-                        .map { it.decodeToString() }
+                    result
                         .map { Json.decodeFromString<StringsKeyValueStore.Response>(it) }
                         .map {
                             when (it) {
@@ -87,6 +100,17 @@ class ShellCommand : Callable<Int> {
         }
 
         return 0
+    }
+
+    private suspend fun sendCommand(raftClient: RaftClusterClient<KVCommand>, cmd: KVCommand): Result<String> {
+        return raftClient.request(cmd)
+            .map { it.decodeToString() }
+    }
+
+    private suspend fun sendQuery(raftClient: RaftClusterClient<KVCommand>, query: StringsKeyValueStore.Request): Result<String> {
+        val serializedQuery = Json.encodeToString(query).encodeToByteArray()
+        return raftClient.query(serializedQuery)
+            .map { it.decodeToString() }
     }
 
     private fun RaftRpc.ClusterNode?.describe() =
@@ -108,85 +132,4 @@ class ShellCommand : Callable<Int> {
             }
         }
     }
-}
-
-@Command(
-    name = "get",
-    description = ["Get a value from the key-value store"]
-)
-class GetCommand : RestRaftCommand() {
-    @Parameters(index = "0", description = ["The key to get"])
-    lateinit var key: String
-
-    @Option(names = ["--peer"], description = ["The host to connect to"], required = true)
-    override lateinit var peers: List<String>
-
-    override fun request(): StringsKeyValueStore.Request = StringsKeyValueStore.Get(key)
-}
-
-@Command(
-    name = "set",
-    description = ["Set a value in the key-value store"]
-)
-class SetCommand : RestRaftCommand() {
-    @Parameters(index = "0", description = ["The key to set"])
-    lateinit var key: String
-
-    @Parameters(index = "1", description = ["The value to set"])
-    lateinit var value: String
-
-    @Option(names = ["--peer"], description = ["The host to connect to"], required = true)
-    override lateinit var peers: List<String>
-
-    override fun request(): StringsKeyValueStore.Request = StringsKeyValueStore.Set(key, value)
-}
-
-@Command(
-    name = "delete",
-    description = ["Delete a value from the key-value store"]
-)
-class DeleteCommand : RestRaftCommand() {
-    @Parameters(index = "0", description = ["The key to delete"])
-    lateinit var key: String
-
-    @Option(names = ["--peer"], description = ["The host to connect to"], required = true)
-    override lateinit var peers: List<String>
-
-    override fun request(): StringsKeyValueStore.Request = StringsKeyValueStore.Delete(key)
-}
-
-
-private fun StringsKeyValueStore.Request.toClientCommand(): LogEntry.ClientCommand {
-    val payload = Json.encodeToString(this).encodeToByteArray()
-    val entry = LogEntry.ClientCommand(payload)
-    return entry
-}
-
-abstract class RestRaftCommand : Callable<String> {
-
-    abstract var peers: List<String>
-
-    override fun call(): String = runBlocking {
-        resourceScope {
-            val cluster = autoCloseable {
-                HttpRaftCluster().apply {
-                    peers.map { it.toClusterNode() }
-                        .forEach { connect(it) }
-                }
-            }
-            val raftClient = RaftClusterClient(cluster)
-            val request = request()
-            val payload = Json.encodeToString(request).encodeToByteArray()
-            val entry = LogEntry.ClientCommand(payload)
-            raftClient.request(entry)
-                .recoverCatching { raftClient.request(entry).getOrThrow() }
-                .map { it.decodeToString() }
-                .map { Json.decodeFromString<StringsKeyValueStore.Response>(it) }
-                .map { it.toString() }
-                .getOrElse { "Error: ${it.message}" }
-                .also { println(it) }
-        }
-    }
-
-    abstract fun request(): StringsKeyValueStore.Request
 }

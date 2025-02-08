@@ -15,8 +15,8 @@ class HttpRaftCluster : RaftCluster.RaftPeers, AutoCloseable {
     private val client = HttpClient(CIO) {
         install(HttpTimeout) {
             connectTimeoutMillis = 1000
-            socketTimeoutMillis = 500
-            requestTimeoutMillis = 1000
+            socketTimeoutMillis = 1000
+            requestTimeoutMillis = 5000
         }
     }
 

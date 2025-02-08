@@ -14,7 +14,7 @@ class RaftLogBuilderScope {
     private val log = TreeMap<Index, LogEntry>()
 
     operator fun String.unaryPlus() {
-        log[log.size + 1L] = LogEntry(term, LogEntry.ClientCommand(this.encodeToByteArray()), randomAlphabetic())
+        log[log.size + 1L] = LogEntry(term, LogEntry.ClientCommand(this.encodeToByteArray(), randomAlphabetic()), randomAlphabetic())
     }
 
     operator fun LogEntry.unaryPlus() {

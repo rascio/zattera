@@ -1,5 +1,7 @@
 package io.r.raft.log
 
+import io.r.utils.toHex
+import io.r.utils.murmur128
 import kotlinx.serialization.KSerializer
 import kotlinx.serialization.Serializable
 
@@ -18,7 +20,9 @@ interface StateMachine<Cmd: StateMachine.Command> {
         val clientId: String,
         val sequence: Long,
         val payload: Payload
-    )
+    ) {
+        val id by lazy { "$clientId-$sequence".encodeToByteArray().murmur128().toHex() }
+    }
     interface Command
 
     companion object {

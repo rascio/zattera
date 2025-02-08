@@ -11,7 +11,6 @@ import io.r.kv.StringsKeyValueStore
 import io.r.raft.client.RaftClusterClient
 import io.r.raft.log.StateMachine
 import io.r.raft.machine.RaftTestCluster.Companion.append
-import io.r.raft.protocol.LogEntry
 import io.r.raft.protocol.LogEntry.ClientCommand
 import io.r.raft.protocol.LogEntryMetadata
 import io.r.raft.protocol.RaftMessage
@@ -26,6 +25,7 @@ import io.r.raft.transport.inmemory.installRaftClusterNetwork
 import io.r.utils.awaitility.atMost
 import io.r.utils.awaitility.until
 import io.r.utils.decodeToString
+import io.r.utils.loggingCtx
 import io.r.utils.logs.entry
 import kotlinx.coroutines.CoroutineName
 import kotlinx.coroutines.CoroutineScope
@@ -42,7 +42,6 @@ import kotlinx.serialization.json.Json
 import org.apache.logging.log4j.LogManager
 import org.apache.logging.log4j.kotlin.logger
 import org.awaitility.Awaitility
-import java.util.concurrent.atomic.AtomicLong
 import kotlin.random.Random
 import kotlin.test.assertIs
 import kotlin.test.assertNotNull
@@ -373,13 +372,27 @@ class RaftMachineTest : FunSpec({
                     },
                     stateMachineFactory = { StringsKeyValueStore() }
                 )
-                val client = RaftClusterClient(clusterNetwork, RaftClusterClient.Configuration(retry = 10))
+                val clientConfiguration = RaftClusterClient.Configuration(
+                    retry = 30,
+                    delay = 200..300L,
+                    jitter = 100..200L
+                )
+                val client = RaftClusterClient(
+                    peers = clusterNetwork,
+                    commandSerializer = StringsKeyValueStore.KVCommand.serializer(),
+                    configuration = clientConfiguration
+                )
                 logger.info("----- started -----")
 
                 coroutineScope {
                     val clientsSendingEntriesJob = launch {
-                        startClientsSendingBatches(C, M, client)
-                            .joinAll()
+                        startClientsSendingBatches(C, M) {
+                            RaftClusterClient(
+                                peers = clusterNetwork,
+                                commandSerializer = StringsKeyValueStore.KVCommand.serializer(),
+                                configuration = clientConfiguration.copy()
+                            )
+                        }.joinAll()
                     }
                     launch(CoroutineName("Chaos")) {
                         // Disconnect the leader
@@ -433,6 +446,7 @@ class RaftMachineTest : FunSpec({
                         maxLogEntriesPerAppend = 4,
                         leaderElectionTimeoutMs = 300L,
                         leaderElectionTimeoutJitterMs = 200,
+                        pendingCommandsTimeout = 30000
                     )
                 }
             )
@@ -482,29 +496,42 @@ class RaftMachineTest : FunSpec({
 private fun CoroutineScope.startClientsSendingBatches(
     clients: Int,
     messages: Int,
-    raftClusterClient: RaftClusterClient
+    raftClusterClientFactory: () -> RaftClusterClient<StringsKeyValueStore.KVCommand>
 ) =
     ('A'..('A' + clients)).map { client ->
         launch(Dispatchers.IO) {
-            repeat(messages) { n -> // batches
-                StringsKeyValueStore.Set("$client", "${'$'}{$client},$n")
-                    .toClientCommand("$client")
-                    .also {
-                        logger.debug {
-                            entry("Client_Send", "client" to client, "msg" to "$client$n", "entry" to it)
-                        }
+            val raftClusterClient = raftClusterClientFactory()
+            loggingCtx("client:$client") {
+                repeat(messages) { n -> // batches
+                    loggingCtx("message-$client$n") {
+                        StringsKeyValueStore.Set("$client", "${'$'}{$client},$n")
+                            .also { logger.info { entry("Client_Send") } }
+                            .let { cmd ->
+                                raftClusterClient.request(cmd)
+                                    .map { Json.decodeFromString<StringsKeyValueStore.Response>(it.decodeToString()) }
+                                    .onFailure {
+                                        logger.error {
+                                            entry(
+                                                "Client_Send_Failure",
+                                                "result" to it.message
+                                            )
+                                        }
+                                    }.onSuccess {
+                                        logger.info {
+                                            entry("Client_Send_Success", "result" to it, "entry" to "$client$n")
+                                        }
+                                        // Keep for debug if any weird behavior happen again
+                                        if (it is StringsKeyValueStore.Value) {
+                                            require(it.value.startsWith("key=$client")) { "expected=message-$client$n found=${it.value}" }
+                                        }
+                                    }
+                                    .getOrThrow()
+                            }
                     }
-                    .let { raftClusterClient.request(it).getOrThrow() }
+                }
             }
         }
     }
-
-val KV_CMD_SEQUENCE = AtomicLong()
-private fun StringsKeyValueStore.KVCommand.toClientCommand(client: String) =
-    StateMachine.Message(client, KV_CMD_SEQUENCE.incrementAndGet(), this)
-        .let { Json.encodeToString(it) }
-        .encodeToByteArray()
-        .let(::ClientCommand)
 
 private fun ByteArray.toKvResponse() =
     this.decodeToString()

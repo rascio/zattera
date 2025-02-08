@@ -32,5 +32,9 @@ val TEST_CMD_SEQUENCE = AtomicLong()
 fun String.toTestCommand(clientId: String = randomAlphabetic(), sequence: Long = TEST_CMD_SEQUENCE.incrementAndGet()) =
     TestCmd(this)
         .let { StateMachine.Message(clientId, sequence, it) }
-        .let { Json.encodeToString(it).encodeToByteArray() }
-        .let { LogEntry.ClientCommand(it) }
+        .let {
+            LogEntry.ClientCommand(
+                Json.encodeToString(it).encodeToByteArray(),
+                it.id
+            )
+        }

@@ -32,7 +32,6 @@ import kotlinx.coroutines.CoroutineName
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.runBlocking
-import kotlinx.serialization.KSerializer
 import kotlinx.serialization.Serializable
 import org.apache.logging.log4j.LogManager
 import picocli.CommandLine
@@ -242,7 +241,7 @@ class SimpleCounter : StateMachine<Inc>{
 
     override suspend fun apply(message: StateMachine.Message<Inc>): ByteArray {
         // Do nothing for now
-        logger.info(entry("Applied", "message" to message))
+        logger.info(entry("Applied", "client_id" to message.clientId, "sequence" to message.sequence, "message" to message.payload))
         return "ADDED_${lastApplied.incrementAndGet()}"
             .encodeToByteArray()
     }

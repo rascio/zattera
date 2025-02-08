@@ -3,22 +3,23 @@ package io.r.kv
 import io.r.kv.StringsKeyValueStore.KVCommand
 import io.r.raft.log.StateMachine
 import io.r.raft.log.StateMachine.Message
-import kotlinx.serialization.KSerializer
+import io.r.utils.logs.entry
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import org.apache.logging.log4j.LogManager
+import java.util.concurrent.ConcurrentHashMap
 
 class StringsKeyValueStore : StateMachine<KVCommand> {
 
-    private val store = mutableMapOf<String, String>()
+    private val store = ConcurrentHashMap<String, String>()
 
     override val commandSerializer = KVCommand.serializer()
 
     override suspend fun apply(message: Message<KVCommand>): ByteArray {
         val request = message.payload
-        return Json.encodeToString(handle(request))
+        return Json.encodeToString(handle(request, message.id))
             .encodeToByteArray()
     }
 
@@ -28,17 +29,21 @@ class StringsKeyValueStore : StateMachine<KVCommand> {
             .encodeToByteArray()
     }
 
-    private fun handle(request: Request): Response = when (request) {
+    private fun handle(request: Request, id: String =""): Response = when (request) {
         is Get -> {
             val value = store[request.key]
             if (value != null) Value(value)
             else NotFound
         }
         is Set -> {
-            store[request.key] = request.value.resolvePlaceholders().also {
-                logger.info("Set key=${request.key} new=$it old=${store[request.key]} value=${request.value}")
+            val value = request.value.resolvePlaceholders().also {
+                logger.debug {
+                    entry("Set-${request.key}", "new" to it, "old" to store[request.key], "value" to request.value, "id" to id)
+                }
             }
+            store[request.key] = value
             Ok
+//            Value("key=${request.key}, value=$value, id=$id")
         }
         is Delete -> {
             store.remove(request.key)
@@ -66,7 +71,7 @@ class StringsKeyValueStore : StateMachine<KVCommand> {
     @Serializable
     data class Set(val key: String, val value: String) : KVCommand
     @Serializable
-    data class Delete(val key: String) : Request
+    data class Delete(val key: String) : KVCommand
 
     @Serializable
     sealed interface Response

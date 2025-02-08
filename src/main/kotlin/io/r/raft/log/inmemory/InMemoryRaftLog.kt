@@ -1,14 +1,13 @@
 package io.r.raft.log.inmemory
 
 import arrow.core.continuations.AtomicRef
+import io.r.raft.log.RaftLog
+import io.r.raft.log.RaftLog.Companion.AppendResult
 import io.r.raft.protocol.Index
 import io.r.raft.protocol.LogEntry
 import io.r.raft.protocol.LogEntryMetadata
 import io.r.raft.protocol.NodeId
 import io.r.raft.protocol.Term
-import io.r.raft.log.RaftLog
-import io.r.raft.log.RaftLog.Companion.AppendResult
-import io.r.utils.concurrency.ReadWriteLock
 import io.r.utils.logs.entry
 import org.apache.logging.log4j.LogManager
 import org.apache.logging.log4j.Logger
@@ -88,6 +87,6 @@ class InMemoryRaftLog(
 
     companion object {
         private val logger: Logger = LogManager.getLogger(InMemoryRaftLog::class.java)
-        private val ROOT_ENTRY = LogEntry(0, LogEntry.ClientCommand(byteArrayOf()), "root")
+        private val ROOT_ENTRY = LogEntry(0, LogEntry.ClientCommand(byteArrayOf(), "root"), "root")
     }
 }

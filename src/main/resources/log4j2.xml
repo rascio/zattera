@@ -3,7 +3,7 @@
                xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
                xsi:schemaLocation="https://logging.apache.org/xml/ns https://logging.apache.org/xml/ns/log4j-config-2.23.1.xsd">
     <Properties>
-        <Property name="LOG_LEVEL">${sys:logLevel:-WARN}</Property>
+        <Property name="LOG_LEVEL">${sys:logLevel:-INFO}</Property>
         <Property name="DIAGNOSTIC">${sys:diagnostic:-DENY}</Property>
     </Properties>
     <Appenders>
@@ -27,6 +27,9 @@
         <Logger name="io.r.raft" level="${LOG_LEVEL}" />
         <Logger name="HttpMessagesLogger" level="INFO" additivity="false">
             <AppenderRef ref="HttpMessagesLoggerConsole"/>
+        </Logger>
+        <Logger name="io.raft.Main" level="INFO" additivity="false">
+            <AppenderRef ref="AsyncConsole"/>
         </Logger>
     </Loggers>
 </Configuration>

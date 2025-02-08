@@ -12,7 +12,6 @@ import io.r.raft.transport.RaftCluster
 import io.r.raft.transport.RaftService
 import io.r.utils.logs.entry
 import kotlinx.coroutines.channels.Channel
-import kotlinx.coroutines.withTimeout
 import org.apache.logging.log4j.LogManager
 import org.apache.logging.log4j.Logger
 
