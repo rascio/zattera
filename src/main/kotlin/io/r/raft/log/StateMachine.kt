@@ -1,33 +1,21 @@
 package io.r.raft.log
 
-import io.r.utils.toHex
-import io.r.utils.murmur128
 import kotlinx.serialization.KSerializer
-import kotlinx.serialization.Serializable
 
-interface StateMachine<Cmd: StateMachine.Command> {
+interface StateMachine<Cmd: StateMachine.Command, Query: StateMachine.Query> {
 
-    val commandSerializer: KSerializer<Cmd>
-
+    val contract: Contract<Cmd, Query>
     /**
      * Apply a log entry to the state machine
      */
-    suspend fun apply(message: Message<Cmd>): ByteArray
-    suspend fun read(query: ByteArray): ByteArray = TODO()
+    suspend fun apply(message: Cmd): ByteArray
+    suspend fun read(query: Query): ByteArray = TODO()
 
-    @Serializable
-    class Message<Payload>(
-        val clientId: String,
-        val sequence: Long,
-        val payload: Payload
-    ) {
-        val id by lazy { "$clientId-$sequence".encodeToByteArray().murmur128().toHex() }
+
+    interface Contract<C: Command, Q: Query> {
+        val commandKSerializer: KSerializer<C>
+        val queryKSerializer: KSerializer<Q>
     }
     interface Command
-
-    companion object {
-        fun <Cmd : Command> StateMachine<Cmd>.commandMessageDeserializer(): KSerializer<Message<Cmd>> {
-            return Message.serializer(commandSerializer)
-        }
-    }
+    interface Query
 }

@@ -18,20 +18,20 @@ suspend fun ResourceScope.installRaftTestNode(
     cluster: RaftClusterTestNetwork,
     configuration: RaftMachine.Configuration = RaftMachine.Configuration(),
     start: Boolean = true
-): RaftTestNode<TestCmd> = installRaftTestNode(
+): RaftTestNode<TestCmd, TestQuery> = installRaftTestNode(
     nodeId = nodeId,
     cluster = cluster,
     configuration = configuration,
     start = start,
     stateMachineFactory = { TestingStateMachine() }
 )
-suspend fun <Cmd: StateMachine.Command> ResourceScope.installRaftTestNode(
+suspend fun <C: StateMachine.Command, Q : StateMachine.Query> ResourceScope.installRaftTestNode(
     nodeId: NodeId,
     cluster: RaftClusterTestNetwork,
     configuration: RaftMachine.Configuration = RaftMachine.Configuration(),
     start: Boolean = true,
-    stateMachineFactory: () -> StateMachine<Cmd>
-): RaftTestNode<Cmd> = install(
+    stateMachineFactory: () -> StateMachine<C, Q>
+): RaftTestNode<C, Q> = install(
     acquire = {
         RaftTestNode(
             raftClusterTestNetwork = cluster,
@@ -45,21 +45,21 @@ suspend fun <Cmd: StateMachine.Command> ResourceScope.installRaftTestNode(
     },
     release = { n, _ -> n.stop() }
 )
-class RaftTestNode<Cmd : StateMachine.Command> private constructor(
+class RaftTestNode<C : StateMachine.Command, Q : StateMachine.Query> private constructor(
     private val raftClusterTestNetwork: RaftClusterTestNetwork,
     private val raftCluster: RaftCluster,
     val configuration: RaftMachine.Configuration,
     private var _log: RaftLog,
     private val scope: CoroutineScope,
-    stateMachine: StateMachine<Cmd>
+    stateMachine: StateMachine<C, Q>
 ) {
     companion object {
-        operator fun <Cmd : StateMachine.Command> invoke(
+        operator fun <C : StateMachine.Command, Q : StateMachine.Query> invoke(
             raftClusterTestNetwork: RaftClusterTestNetwork,
             nodeId: NodeId,
             configuration: RaftMachine.Configuration,
             scope: CoroutineScope? = null,
-            stateMachine: StateMachine<Cmd>
+            stateMachine: StateMachine<C, Q>
         ) = RaftTestNode(
             raftClusterTestNetwork = raftClusterTestNetwork,
             raftCluster = RaftCluster(nodeId, raftClusterTestNetwork),
@@ -83,7 +83,14 @@ class RaftTestNode<Cmd : StateMachine.Command> private constructor(
         )
     }
     val log get() = _log
-    val raftMachine = newRaftMachine(stateMachine)
+    val raftMachine = RaftMachine(
+        input = raftClusterTestNetwork.channel(id),
+        configuration = configuration,
+        log = _log,
+        cluster = raftCluster,
+        stateMachine = StateMachineAdapter(scope, stateMachine),
+        scope = scope
+    )
     val commitIndex get() = raftMachine.serverState.commitIndex
     val id: NodeId get() = raftCluster.id
     val roleChanges get() = raftMachine.role
@@ -112,14 +119,5 @@ class RaftTestNode<Cmd : StateMachine.Command> private constructor(
     fun reconnect() {
         raftClusterTestNetwork.reconnect(id)
     }
-
-    private fun <Cmd : StateMachine.Command> newRaftMachine(stateMachine: StateMachine<Cmd>) = RaftMachine(
-        input = raftClusterTestNetwork.channel(id),
-        configuration = configuration,
-        log = _log,
-        cluster = raftCluster,
-        stateMachine = stateMachine,
-        scope = scope
-    )
 }
 

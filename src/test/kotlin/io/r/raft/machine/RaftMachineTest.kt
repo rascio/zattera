@@ -345,8 +345,8 @@ class RaftMachineTest : FunSpec({
                     val actualCmds = logs
                         .filter { it.entry is ClientCommand }
                         .map { it.entry.decodeToString() }
-                        .map { Json.decodeFromString<StateMachine.Message<TestCmd>>(it) }
-                        .map { it.payload.value }
+                        .map { Json.decodeFromString<TestCmd>(it) }
+                        .map { it.value }
                     actualCmds shouldBe expectedLogs
                 }
             }
@@ -379,8 +379,8 @@ class RaftMachineTest : FunSpec({
                 )
                 val client = RaftClusterClient(
                     peers = clusterNetwork,
-                    commandSerializer = StringsKeyValueStore.KVCommand.serializer(),
-                    configuration = clientConfiguration
+                    configuration = clientConfiguration,
+                    contract = StringsKeyValueStore
                 )
                 logger.info("----- started -----")
 
@@ -389,8 +389,8 @@ class RaftMachineTest : FunSpec({
                         startClientsSendingBatches(C, M) {
                             RaftClusterClient(
                                 peers = clusterNetwork,
-                                commandSerializer = StringsKeyValueStore.KVCommand.serializer(),
-                                configuration = clientConfiguration.copy()
+                                configuration = clientConfiguration.copy(),
+                                contract = StringsKeyValueStore
                             )
                         }.joinAll()
                     }

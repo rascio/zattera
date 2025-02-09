@@ -87,6 +87,10 @@ class InMemoryRaftLog(
 
     companion object {
         private val logger: Logger = LogManager.getLogger(InMemoryRaftLog::class.java)
-        private val ROOT_ENTRY = LogEntry(0, LogEntry.ClientCommand(byteArrayOf(), "root"), "root")
+        private val ROOT_ENTRY = LogEntry(
+            term = 0,
+            entry = LogEntry.NoOp,
+            id = "root"
+        )
     }
 }

@@ -3,17 +3,13 @@ package io.r.raft.machine
 import io.r.raft.log.RaftLog
 import io.r.raft.log.RaftLog.Companion.getLastMetadata
 import io.r.raft.log.StateMachine
-import io.r.raft.log.StateMachine.Companion.commandMessageDeserializer
-import io.r.raft.machine.linearizability.IdempotentStateMachine
+import io.r.raft.machine.StateMachineAdapter.Companion.isValidCommand
 import io.r.raft.protocol.LogEntry
 import io.r.raft.protocol.RaftMessage
 import io.r.raft.protocol.RaftRole
 import io.r.raft.transport.RaftCluster
-import io.r.utils.toHex
-import io.r.utils.encodeBase64
 import io.r.utils.loggingCtx
 import io.r.utils.logs.entry
-import io.r.utils.murmur128
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -30,25 +26,20 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.selects.onTimeout
 import kotlinx.coroutines.selects.select
 import kotlinx.coroutines.withTimeout
-import kotlinx.serialization.encodeToString
-import kotlinx.serialization.json.Json
 import org.apache.logging.log4j.LogManager
 import org.apache.logging.log4j.Logger
 import org.apache.logging.log4j.MarkerManager
 import org.apache.logging.log4j.kotlin.additionalLoggingContext
-import org.apache.logging.log4j.kotlin.logger
 import java.util.concurrent.ConcurrentHashMap
 
-class RaftMachine<Cmd : StateMachine.Command>(
+class RaftMachine<C: StateMachine.Contract<*, *>>(
     private val configuration: Configuration,
     private val cluster: RaftCluster,
     private val log: RaftLog,
-    stateMachine: StateMachine<Cmd>,
+    private val stateMachine: StateMachineAdapter<*, *, C>,
     private val scope: CoroutineScope = CoroutineScope(Dispatchers.IO),
     private val input: Channel<RaftMessage> = Channel(capacity = Channel.BUFFERED)
 ) {
-
-    private val stateMachine = IdempotentStateMachine(scope, stateMachine)
 
     /*
      * This class is used to keep track of the client requests
@@ -145,15 +136,9 @@ class RaftMachine<Cmd : StateMachine.Command>(
      */
     suspend fun command(cmd: LogEntry.Entry): Response = loggingCtx(mapOf("NodeId" to cluster.id)) {
         if (cmd is LogEntry.ClientCommand) {
-            requireIsKnownCommand(cmd)
+            require(stateMachine.contract.isValidCommand(cmd)) { "Invalid command $cmd" }
         }
-        val payload = Json.encodeToString(cmd)
-            .encodeToByteArray()
-        if (cmd is LogEntry.ClientCommand) {
-            logger.info {
-                entry("tracking", "cmd" to cmd.bytes.decodeToString(), "id" to payload.murmur128().toHex())
-            }
-        }
+
         val request = IncomingRequest(
             id = cmd.id,
             entry = cmd,
@@ -267,11 +252,7 @@ class RaftMachine<Cmd : StateMachine.Command>(
                     }
                     val result = when (it.entry) {
                         is LogEntry.ClientCommand -> {
-                            val cmd = Json.decodeFromString(
-                                deserializer = stateMachine.commandMessageDeserializer(),
-                                string = it.entry.bytes.decodeToString()
-                            )
-                            stateMachine.apply(cmd)
+                            stateMachine.apply(it.entry)
                                 .also {
                                     logger.info { entry("Applied", "result" to it.decodeToString()) }
                                 }
@@ -361,28 +342,6 @@ class RaftMachine<Cmd : StateMachine.Command>(
         scope,
         configuration
     )
-
-    private fun requireIsKnownCommand(cmd: LogEntry.ClientCommand) {
-        try {
-            Json.decodeFromString(
-                deserializer = stateMachine.commandMessageDeserializer(),
-                string = cmd.bytes.decodeToString()
-            )
-        } catch (e: Exception) {
-            logger.warn {
-                entry(
-                    "Invalid_Command",
-                    "command" to cmd.bytes.encodeBase64()
-                )
-            }
-            throw IllegalArgumentException(
-                "Invalid command " +
-                    "stateMachine=${stateMachine::class.qualifiedName} " +
-                    "command=${cmd.bytes.encodeBase64()}",
-                e
-            )
-        }
-    }
 
     companion object {
         val DIAGNOSTIC_MARKER = MarkerManager.getMarker("RAFT_DIAGNOSTIC")

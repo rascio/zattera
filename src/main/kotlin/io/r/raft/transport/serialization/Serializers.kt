@@ -24,3 +24,17 @@ object ByteArrayBase64Serializer : KSerializer<ByteArray> {
         return base64String.decodeBase64Bytes()
     }
 }
+
+object UUIDSerializer : KSerializer<java.util.UUID> {
+    override val descriptor: SerialDescriptor = PrimitiveSerialDescriptor(
+        "UUID", PrimitiveKind.STRING
+    )
+
+    override fun serialize(encoder: Encoder, value: java.util.UUID) {
+        encoder.encodeString(value.toString())
+    }
+
+    override fun deserialize(decoder: Decoder): java.util.UUID {
+        return java.util.UUID.fromString(decoder.decodeString())
+    }
+}

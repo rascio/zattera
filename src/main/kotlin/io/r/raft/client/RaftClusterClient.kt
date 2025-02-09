@@ -18,10 +18,10 @@ import java.util.concurrent.atomic.AtomicLong
 
 class RaftClusterClient<Cmd : StateMachine.Command>(
     private val peers: RaftCluster.RaftPeers,
-    private val commandSerializer: KSerializer<Cmd>,
+    private val contract: StateMachine.Contract<Cmd, *>,
     private val configuration: Configuration = Configuration()
 ) {
-    private val clientId: String = UUID.randomUUID().toString()
+    private val clientId: UUID = UUID.randomUUID()
 
     private val sequence = AtomicLong()
 
@@ -103,16 +103,13 @@ class RaftClusterClient<Cmd : StateMachine.Command>(
     }
 
     private fun Cmd.toClientCommand() =
-        StateMachine.Message(clientId, sequence.incrementAndGet(), this)
-            .let {
-                val bytes = Json.encodeToString(
-                    serializer = StateMachine.Message.serializer(commandSerializer),
-                    value = it
-                ).encodeToByteArray()
+        Json.encodeToString(serializer = contract.commandKSerializer, value = this)
+            .encodeToByteArray()
+            .let { LogEntry.ClientCommand(it, clientId, sequence.incrementAndGet()) }
+            .also {
                 logger.info(DIAGNOSTIC_MARKER) {
                     entry("track_messages", "cmd" to this, "id" to it.id)
                 }
-                LogEntry.ClientCommand(bytes, it.id)
             }
 
     companion object {

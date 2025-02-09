@@ -5,6 +5,7 @@ import io.kotest.matchers.shouldBe
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
+import java.util.UUID
 import java.util.concurrent.atomic.AtomicInteger
 import kotlin.random.Random
 
@@ -43,7 +44,8 @@ private val logEntries = LogEntry.Entry::class
             LogEntry.ClientCommand::class -> listOf(
                     LogEntry.ClientCommand(
                         bytes = randomAlphabetic().encodeToByteArray(),
-                        id = randomAlphabetic()
+                        clientId = UUID.randomUUID(),
+                        sequence = Random.nextLong(0, 100)
                     )
             )
 

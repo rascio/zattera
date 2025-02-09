@@ -69,7 +69,7 @@ class ShellCommand : Callable<Int> {
                 }
                 val raftClient = RaftClusterClient(
                     peers = cluster,
-                    commandSerializer = KVCommand.serializer(),
+                    contract = StringsKeyValueStore,
                     configuration = RaftClusterClient.Configuration(
                         retry = retry,
                         delay = delay..(delay + jitter),

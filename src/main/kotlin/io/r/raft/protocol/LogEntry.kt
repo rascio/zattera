@@ -1,7 +1,11 @@
 package io.r.raft.protocol
 
 import io.r.raft.transport.serialization.ByteArrayBase64Serializer
+import io.r.raft.transport.serialization.UUIDSerializer
+import io.r.utils.murmur128
+import io.r.utils.toHex
 import kotlinx.serialization.Serializable
+import java.nio.ByteBuffer
 import java.util.UUID
 
 @Serializable
@@ -21,8 +25,21 @@ data class LogEntry(
     class ClientCommand(
         @Serializable(with = ByteArrayBase64Serializer::class)
         val bytes: ByteArray,
-        override val id: String
+        @Serializable(with = UUIDSerializer::class)
+        val clientId: UUID,
+        val sequence: Long
     ) : Entry {
+
+        override val id by lazy {
+            ByteBuffer.allocate(bytes.size + (Long.SIZE_BYTES * 3))
+                .putLong(sequence)
+                .putLong(clientId.leastSignificantBits)
+                .putLong(clientId.mostSignificantBits)
+                .put(bytes)
+                .array()
+                .murmur128()
+                .toHex()
+        }
 
         override fun equals(other: Any?): Boolean {
             if (this === other) return true

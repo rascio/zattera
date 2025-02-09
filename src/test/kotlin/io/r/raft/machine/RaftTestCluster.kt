@@ -17,15 +17,16 @@ import kotlinx.coroutines.withTimeoutOrNull
 import org.apache.logging.log4j.LogManager
 import org.apache.logging.log4j.Logger
 import org.apache.logging.log4j.kotlin.loggingContext
+import java.util.UUID
 import kotlin.time.Duration
 import kotlin.time.Duration.Companion.seconds
 
-class RaftTestCluster<Cmd : StateMachine.Command>(
-    nodes: List<RaftTestNode<Cmd>>,
-    private val stateMachineFactory: () -> StateMachine<Cmd>
+class RaftTestCluster<C : StateMachine.Command, Q : StateMachine.Query>(
+    nodes: List<RaftTestNode<C, Q>>,
+    private val stateMachineFactory: () -> StateMachine<C, Q>
 ) {
 
-    val nodes: MutableList<RaftTestNode<Cmd>> = mutableListOf(*nodes.toTypedArray())
+    val nodes: MutableList<RaftTestNode<C, Q>> = mutableListOf(*nodes.toTypedArray())
 
     private val logger: Logger = LogManager.getLogger(RaftTestCluster::class.java)
 
@@ -56,7 +57,7 @@ class RaftTestCluster<Cmd : StateMachine.Command>(
     /**
      * Wait until a leader is elected
      */
-    suspend fun awaitFindLeader(timeout: Duration = 3.seconds): RaftTestNode<Cmd> {
+    suspend fun awaitFindLeader(timeout: Duration = 3.seconds): RaftTestNode<C, Q> {
         logger.info("await_find_leader")
         val leader = "await_find_leader" atMost timeout untilNotNull {
             nodes.filter { it.isLeader() }
@@ -68,7 +69,7 @@ class RaftTestCluster<Cmd : StateMachine.Command>(
         return leader
     }
 
-    suspend fun awaitDifferentLeaderElected(initialLeader: NodeId, timeout: Duration = 3.seconds): RaftTestNode<Cmd> {
+    suspend fun awaitDifferentLeaderElected(initialLeader: NodeId, timeout: Duration = 3.seconds): RaftTestNode<C, Q> {
         logger.info("waiting_for_leader_change")
         val leader = "await_leader_change" atMost timeout untilNotNull {
             nodes.filter { it.id != initialLeader }
@@ -92,13 +93,14 @@ class RaftTestCluster<Cmd : StateMachine.Command>(
 
     companion object {
 
-        suspend fun RaftTestCluster<TestCmd>.append(vararg commands: String) = append(commands.toList())
-        suspend fun RaftTestCluster<TestCmd>.append(commands: List<String>): Unit = coroutineScope {
+        suspend fun RaftTestCluster<TestCmd, TestQuery>.append(vararg commands: String) = append(commands.toList())
+        suspend fun RaftTestCluster<TestCmd, TestQuery>.append(commands: List<String>): Unit = coroutineScope {
+            val clientId = UUID.randomUUID()
             awaitFindLeader()
                 .let { leader ->
                     try {
                         withTimeoutOrNull(1000) {
-                            commands.forEach { leader.raftMachine.command(it.toTestCommand("append")) }
+                            commands.forEach { leader.raftMachine.command(it.toTestCommand(clientId)) }
                         }
                     } catch (e: Exception) {
                         when (e.message) {
@@ -116,12 +118,12 @@ class RaftTestCluster<Cmd : StateMachine.Command>(
     }
 }
 
-suspend fun <Cmd : StateMachine.Command> ResourceScope.installRaftTestCluster(
+suspend fun <C : StateMachine.Command, Q : StateMachine.Query> ResourceScope.installRaftTestCluster(
     network: RaftClusterTestNetwork,
     nodeIds: List<NodeId>,
     config: (NodeId) -> RaftMachine.Configuration,
-    stateMachineFactory: () -> StateMachine<Cmd>
-): RaftTestCluster<Cmd> {
+    stateMachineFactory: () -> StateMachine<C, Q>
+): RaftTestCluster<C, Q> {
     val nodes = nodeIds.map { id ->
         val scope = installCoroutine(loggingContext(mapOf("NodeId" to id)))
         install({

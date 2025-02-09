@@ -21,6 +21,7 @@ import io.ktor.server.routing.routing
 import io.r.raft.log.StateMachine
 import io.r.raft.log.inmemory.InMemoryRaftLog
 import io.r.raft.machine.RaftMachine
+import io.r.raft.machine.StateMachineAdapter
 import io.r.raft.protocol.LogEntry
 import io.r.raft.protocol.toClusterNode
 import io.r.raft.transport.RaftCluster
@@ -210,7 +211,7 @@ class RestRaftServer : Callable<String> {
                 ),
                 cluster = raftCluster,
                 log = raftLog,
-                stateMachine = newStateMachine(),
+                stateMachine = StateMachineAdapter(coroutineScope, newStateMachine()),
                 scope = coroutineScope
             ).apply {
                 start()
@@ -219,34 +220,38 @@ class RestRaftServer : Callable<String> {
         release = { it, _ -> it.stop() }
     )
 
-    private fun newStateMachine() : StateMachine<*> {
+    private fun newStateMachine() : StateMachine<*, *> {
         val clazz = Class.forName(stateMachine)
         require(StateMachine::class.java.isAssignableFrom(clazz)) {
             "State machine must implement the StateMachine interface"
         }
         val constructor = clazz.getConstructor()
-        return constructor.newInstance() as StateMachine<*>
+        return constructor.newInstance() as StateMachine<*, *>
     }
 }
 
-
 @JacocoExclusionNeedsGenerated
-@Serializable
-data object Inc : StateMachine.Command
-class SimpleCounter : StateMachine<Inc>{
+class SimpleCounter : StateMachine<SimpleCounter.Inc, SimpleCounter.Get>{
+
+    @Serializable
+    data object Inc : StateMachine.Command
+    @Serializable
+    data object Get : StateMachine.Query
 
     private val lastApplied = AtomicLong()
 
-    override val commandSerializer = Inc.serializer()
+    override val contract = Companion
 
-    override suspend fun apply(message: StateMachine.Message<Inc>): ByteArray {
+    override suspend fun apply(message: Inc): ByteArray {
         // Do nothing for now
-        logger.info(entry("Applied", "client_id" to message.clientId, "sequence" to message.sequence, "message" to message.payload))
+        logger.info(entry("Applied", "client_id" to message))
         return "ADDED_${lastApplied.incrementAndGet()}"
             .encodeToByteArray()
     }
 
-    companion object {
+    companion object : StateMachine.Contract<Inc, Get> {
+        override val commandKSerializer = Inc.serializer()
+        override val queryKSerializer = Get.serializer()
         private val logger = LogManager.getLogger(SimpleCounter::class.java)
     }
 }
