@@ -41,6 +41,7 @@ import picocli.CommandLine.Parameters
 import java.util.concurrent.Callable
 import kotlin.system.exitProcess
 
+@JacocoExclusionNeedsGenerated
 fun main(args: Array<String>) {
     val exitCode = CommandLine(RestRaftServer()).execute(*args)
     exitProcess(exitCode)
@@ -58,7 +59,6 @@ fun main(args: Array<String>) {
         - GET /entries to get all entries
     """,
 )
-@JacocoExclusionNeedsGenerated
 class RestRaftServer : Callable<String> {
 
     private val logger = LogManager.getLogger(RestRaftServer::class.java)

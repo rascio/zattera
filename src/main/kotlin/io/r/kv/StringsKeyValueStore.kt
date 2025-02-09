@@ -9,6 +9,18 @@ import kotlinx.serialization.Serializable
 import org.apache.logging.log4j.LogManager
 import java.util.concurrent.ConcurrentHashMap
 
+/**
+ * A simple key-value store that stores strings.
+ * It supports setting, getting, and deleting keys.
+ * It also supports placeholders in the values, which are resolved using the current store, eg:
+ * ```
+ * set key1 value1
+ * set key2 {{key1}}-value2
+ * get key2
+ * ```
+ * will return `value1-value2`.
+ *
+ */
 class StringsKeyValueStore : StateMachine<KVCommand, KVQuery, KVResponse> {
 
     private val store = ConcurrentHashMap<String, String>()
@@ -24,7 +36,7 @@ class StringsKeyValueStore : StateMachine<KVCommand, KVQuery, KVResponse> {
 
     }
 
-    private fun handle(request: Request): KVResponse = when (request) {
+    private fun handle(request: KVRequest): KVResponse = when (request) {
         is Get -> {
             val value = store[request.key]
             if (value != null) Value(value)
@@ -59,13 +71,13 @@ class StringsKeyValueStore : StateMachine<KVCommand, KVQuery, KVResponse> {
 
 
     @Serializable
-    sealed interface Request
+    sealed interface KVRequest
 
 
     @Serializable
-    sealed interface KVCommand : StateMachine.Command, Request
+    sealed interface KVCommand : StateMachine.Command, KVRequest
     @Serializable
-    sealed interface KVQuery : StateMachine.Query, Request
+    sealed interface KVQuery : StateMachine.Query, KVRequest
     @Serializable
     sealed interface KVResponse : StateMachine.Response
 
@@ -93,7 +105,7 @@ class StringsKeyValueStore : StateMachine<KVCommand, KVQuery, KVResponse> {
         override val queryKSerializer = KVQuery.serializer()
         override val responseKSerializer = KVResponse.serializer()
 
-        val PLACEHOLDER_REGEX = Regex("\\$\\{([^}]+)}")
+        val PLACEHOLDER_REGEX = Regex("\\{\\{([^}]+)}}")
         private val logger = LogManager.getLogger(StringsKeyValueStore::class.java)
     }
 }

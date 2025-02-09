@@ -7,8 +7,6 @@ import io.r.raft.protocol.NodeId
 import io.r.raft.protocol.RaftRpc
 import io.r.raft.transport.RaftCluster
 import io.r.raft.transport.RaftService
-import org.apache.logging.log4j.LogManager
-import org.apache.logging.log4j.Logger
 
 class HttpRaftCluster : RaftCluster.RaftPeers, AutoCloseable {
 
@@ -40,11 +38,17 @@ class HttpRaftCluster : RaftCluster.RaftPeers, AutoCloseable {
 
     override fun close() {
         // improve multi exception handling
-        peers.values.forEach { it.close() }
+        peers.values
+            .mapNotNull {
+                runCatching { it.close() }
+                    .exceptionOrNull()
+            }
+            .takeIf { it.isNotEmpty() }
+            ?.fold(RuntimeException("Failures closing peers")) { acc, e ->
+                acc.apply { addSuppressed(e) }
+            }
     }
 
-    companion object {
-        private val logger: Logger = LogManager.getLogger(HttpRaftCluster::class.java)
-    }
+    companion object
 
 }

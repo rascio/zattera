@@ -3,12 +3,12 @@
 > I'm too lazy to find a better name, so it is just a translation
 
 ## What is it?
-A bad implementation of a raft consensus algorithm, just for fun.
+A "bad" implementation of a raft consensus algorithm, just for fun.
 
 ## Testing
 `scripts/` folder contains scripts to start nodes/cluster and clients:
 
-- `start-node.sh`: Starts a node with the given parameters, support a simple server and a KV store
+- `start-node.sh`: Starts a node with the given parameters, support a simple counter and a KV store
 - `key-value.sh`: CLI to interact with the KV store
 
 both support `-h` to show the help message.
@@ -29,11 +29,6 @@ both support `-h` to show the help message.
 
 ### Interact with Server
 
-#### Add an entry to the log (simple server)
-```shell
-curl http://localhost:8081/entries -d "Some raw text"
-```
-
 #### Read the log
 ```shell
 curl http://localhost:8081/entries
@@ -47,4 +42,20 @@ curl -v http://localhost:8081/raft/request -d '{"type":"io.r.raft.protocol.LogEn
 and then
 ```shell
 ./scripts/start-node.sh -id 4 -cluster-size 3 -kv
+```
+
+### Debug
+
+#### RaftMachine Logs
+```shell
+# Get logs for a single node
+cat .logs/test-logs.out| grep -E "NodeId=T1" | pbcopy
+
+```
+#### RaftMachineTest
+```shell
+# Get Raft log dumps
+cat .logs/test-logs.out | ggrep -oPz "(?s)Dump_log.*?End_Dump\s" | pbcopy
+# Entries applied to state machine (replace T1 with actual node id)
+cat .logs/test-logs.out| grep -E "NodeId=T1 \| _event=\"(Applied|Set-A)" | pbcopy
 ```

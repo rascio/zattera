@@ -500,7 +500,7 @@ private fun CoroutineScope.startClientsSendingBatches(
             loggingCtx("client:$client") {
                 repeat(messages) { n -> // batches
                     loggingCtx("message-$client$n") {
-                        StringsKeyValueStore.Set("$client", "${'$'}{$client},$n")
+                        StringsKeyValueStore.Set("$client", "{{$client}},$n")
                             .also { logger.info { entry("Client_Send") } }
                             .let { cmd ->
                                 raftClusterClient.request(cmd)
