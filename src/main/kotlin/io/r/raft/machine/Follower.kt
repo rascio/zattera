@@ -2,6 +2,7 @@ package io.r.raft.machine
 
 import io.r.raft.log.RaftLog
 import io.r.raft.log.RaftLog.Companion.AppendResult
+import io.r.raft.machine.RaftMachine.Companion.DIAGNOSTIC_MARKER
 import io.r.raft.protocol.LogEntry
 import io.r.raft.protocol.RaftMessage
 import io.r.raft.protocol.RaftRole
@@ -72,7 +73,7 @@ class Follower(
                     )
                 }
                 else -> {
-                    logger.warn {
+                    logger.warn(DIAGNOSTIC_MARKER) {
                         entry(
                             "Rejected_Append",
                             "reason" to (result ?: "Leader is behind"),
@@ -95,7 +96,9 @@ class Follower(
             cluster.send(to = message.from, rpc = rcp)
         }
         else -> {
-            logger.debug(entry("Ignoring_Message", "message" to message.rpc, "from" to message.from))
+            logger.debug(DIAGNOSTIC_MARKER) {
+                entry("Ignoring_Message", "message" to message.rpc, "from" to message.from)
+            }
         }
     }
 

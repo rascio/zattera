@@ -7,7 +7,6 @@ import io.r.raft.log.StateMachine
 import io.r.utils.logs.entry
 import kotlinx.serialization.Serializable
 import org.apache.logging.log4j.LogManager
-import java.util.concurrent.ConcurrentHashMap
 
 /**
  * A simple key-value store that stores strings.
@@ -23,7 +22,7 @@ import java.util.concurrent.ConcurrentHashMap
  */
 class StringsKeyValueStore : StateMachine<KVCommand, KVQuery, KVResponse> {
 
-    private val store = ConcurrentHashMap<String, String>()
+    private val store = mutableMapOf<String, String>()
 
     override val contract = Companion
 

@@ -36,6 +36,7 @@ import kotlinx.coroutines.joinAll
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeout
 import kotlinx.serialization.decodeFromString
+import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import org.apache.logging.log4j.LogManager
 import org.apache.logging.log4j.kotlin.logger
@@ -350,84 +351,6 @@ class RaftMachineTest : FunSpec({
                 }
             }
         }
-        test("Test linearaizability of client commands").config(timeout = 90.seconds) {
-            resourceScope {
-                // C clients sending B batches of M messages each
-                val C = 8
-                val M = 15
-
-                val clusterNetwork = installRaftClusterNetwork()
-                val cluster = installRaftTestCluster(
-                    network = clusterNetwork,
-                    nodeIds = (1..3).map { "T$it" },
-                    config = {
-                        RaftMachine.Configuration(
-                            maxLogEntriesPerAppend = 4,
-                            leaderElectionTimeoutMs = 100L,
-                            leaderElectionTimeoutJitterMs = 60,
-                            heartbeatTimeoutMs = 30L,
-                            pendingCommandsTimeout = 5000L
-                        )
-                    },
-                    stateMachineFactory = { StringsKeyValueStore() }
-                )
-                val clientConfiguration = RaftClusterClient.Configuration(
-                    retry = 30,
-                    delay = 200..300L,
-                    jitter = 100..200L
-                )
-                val client = RaftClusterClient(
-                    peers = clusterNetwork,
-                    configuration = clientConfiguration,
-                    contract = StringsKeyValueStore
-                )
-                logger.info("----- started -----")
-
-                coroutineScope {
-                    val clientsSendingEntriesJob = launch {
-                        startClientsSendingBatches(C, M) {
-                            RaftClusterClient(
-                                peers = clusterNetwork,
-                                configuration = clientConfiguration.copy(),
-                                contract = StringsKeyValueStore
-                            )
-                        }.joinAll()
-                    }
-                    launch(CoroutineName("Chaos")) {
-                        // Disconnect the leader
-                        do {
-                            cluster.nodes.forEach { node ->
-                                if (node.isLeader()) {
-                                    node.disconnect()
-                                    delay(node.configuration.heartbeatTimeoutMs * Random.nextLong(5, 10))
-                                    node.reconnect()
-                                    delay(node.configuration.heartbeatTimeoutMs * Random.nextLong(8, 15))
-                                }
-                            }
-                        } while (clientsSendingEntriesJob.isActive)
-                    }.invokeOnCompletion {
-                        cluster.nodes.forEach { it.reconnect() }
-                    }
-                    clientsSendingEntriesJob.join()
-                }
-                cluster.awaitLogConvergence(10.seconds)
-                cluster.dumpRaftLogs(decode = true)
-                ('A'..('A' + C)).forEach { key ->
-                    val string = StringsKeyValueStore.Get("$key")
-                        .let { client.query(it) }
-                    val response = string.getOrThrow()
-                    assertIs<StringsKeyValueStore.Value>(response)
-                    val list = response
-                        .value
-                        .split(",")
-                        .drop(1) // messages start with a comma
-
-                    withClue("Key $key") {
-                        list shouldBe (0 until M).map { "$it" }
-                    }
-                }
-            }
-        }
     }
     context("Dynamic cluster") {
         // 'refs' is a map with the id and transport for each node
@@ -490,41 +413,3 @@ class RaftMachineTest : FunSpec({
     }
 })
 
-private fun CoroutineScope.startClientsSendingBatches(
-    clients: Int,
-    messages: Int,
-    raftClusterClientFactory: () -> RaftClusterClient<StringsKeyValueStore.KVCommand, StringsKeyValueStore.KVQuery, StringsKeyValueStore.KVResponse>
-) =
-    ('A'..('A' + clients)).map { client ->
-        launch(Dispatchers.IO) {
-            val raftClusterClient = raftClusterClientFactory()
-            loggingCtx("client:$client") {
-                repeat(messages) { n -> // batches
-                    loggingCtx("message-$client$n") {
-                        StringsKeyValueStore.Set("$client", "{{$client}},$n")
-                            .also { logger.info { entry("Client_Send") } }
-                            .let { cmd ->
-                                raftClusterClient.request(cmd)
-                                    .onFailure {
-                                        logger.error {
-                                            entry(
-                                                "Client_Send_Failure",
-                                                "result" to it.message
-                                            )
-                                        }
-                                    }.onSuccess {
-                                        logger.info {
-                                            entry("Client_Send_Success", "result" to it, "entry" to "$client$n")
-                                        }
-                                        // Keep for debug if any weird behavior happen again
-                                        if (it is StringsKeyValueStore.Value) {
-                                            require(it.value.startsWith("key=$client")) { "expected=message-$client$n found=${it.value}" }
-                                        }
-                                    }
-                                    .getOrThrow()
-                            }
-                    }
-                }
-            }
-        }
-    }

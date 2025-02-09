@@ -29,6 +29,7 @@ import kotlinx.coroutines.selects.onTimeout
 import kotlinx.coroutines.selects.select
 import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.withTimeoutOrNull
+import kotlinx.coroutines.yield
 import org.apache.logging.log4j.LogManager
 import kotlin.test.assertEquals
 import kotlin.test.assertIs
@@ -335,6 +336,9 @@ class LeaderTest : FunSpec({
                 logger.info("Starting leader")
 
                 leader.onEnter()
+                // force suspension to be sure the heartbeat is started
+                // (yield() also should work, but it depends on the implementation of the Dispatchers)
+                delay(5)
 
                 logger.info("Changing configuration")
 
@@ -345,6 +349,7 @@ class LeaderTest : FunSpec({
                         )
                     )
                 )
+
                 val lastCommittedEntry = LogEntryMetadata(index = 1, term = 0)
                 val N1 = network.createNode("N1")
 

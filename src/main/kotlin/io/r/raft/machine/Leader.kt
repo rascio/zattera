@@ -14,6 +14,7 @@ import io.r.raft.transport.RaftCluster
 import io.r.raft.transport.RaftCluster.Companion.quorum
 import io.r.utils.logs.entry
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineName
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
@@ -45,7 +46,9 @@ class Leader(
         serverState.leader = cluster.id
         peers += cluster.peers
             .associateWith { PeerState(log.getLastIndex() + 1, 0) }
-        val cont = peers.map { CompletableDeferred<Unit>() }
+
+        // needed to iterate it later, avoid access mutable state (got a bug)
+        val peerAndHeartbeat = peers.mapValues { CompletableDeferred<Unit>() }
 
         log.append(
             log.getLastMetadata(),
@@ -58,10 +61,10 @@ class Leader(
             )
         )
 
-        heartbeat = scope.launch {
-            cluster.peers.forEachIndexed { idx, peer ->
+        heartbeat = scope.launch(EXCEPTION_HANDLER) {
+            peerAndHeartbeat.forEach { (peer, cont) ->
                 launch(CoroutineName("Heartbeat-$peer")) {
-                    cont[idx].complete(Unit)
+                    cont.complete(Unit)
                     startHeartBeat(peer)
                 }
             }
@@ -72,14 +75,14 @@ class Leader(
                         peers.computeIfAbsent(it.node) {
                             PeerState(lastIndex + 1, 0)
                         }
-                        launch {
+                        launch(CoroutineName("Heartbeat-${it.node}")) {
                             startHeartBeat(it.node)
                         }
                     }
                 }
             }
         }
-        cont.joinAll()
+        peerAndHeartbeat.values.joinAll()
     }
 
     override suspend fun onExit() {
@@ -283,5 +286,11 @@ class Leader(
 
     companion object {
         private val logger = LogManager.getLogger(Leader::class.java)
+
+        private val EXCEPTION_HANDLER = CoroutineExceptionHandler { ctx, exception ->
+            logger.atError()
+                .withThrowable(exception)
+                .log { entry("Coroutine_Failed", "name" to ctx[CoroutineName]) }
+        }
     }
 }

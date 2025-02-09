@@ -1,26 +1,31 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<Configuration xmlns="https://logging.apache.org/xml/ns"
-               xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
-               xsi:schemaLocation="https://logging.apache.org/xml/ns https://logging.apache.org/xml/ns/log4j-config-2.23.1.xsd">
+<Configuration>
+    <Properties>
+        <Property name="LOG_LEVEL">${sys:logConsoleLevel:-DEBUG}</Property>
+        <Property name="FILE_APPENDER_LEVEL">${sys:logFileAppenderLevel:-DEBUG}</Property>
+        <Property name="DIAGNOSTIC_MATCH">${sys:logDiagnosticMatch:-DENY}</Property>
+    </Properties>
     <Appenders>
         <Console name="Console" target="SYSTEM_OUT">
             <PatternLayout pattern="%d{yyyy-MM-dd HH:mm:ss.SSS} %level{INFO=ℹ️,DEBUG=🔧,ERROR=❌,WARN=⚠️} [%7.7t] | %10.10c{1} | NodeId=%X{NodeId} %m %NDC %n"/>
         </Console>
         <Async name="AsyncConsole">
             <AppenderRef ref="Console"/>
-
         </Async>
 
         <File name="File" fileName=".logs/test-logs.out" append="false">
             <PatternLayout pattern="%d{yyyy-MM-dd HH:mm:ss.SSS} | %5level | [%10.10t] | %15.15c{1} | NodeId=%X{NodeId} | %m | %NDC%n"/>
+            <Filters>
+                <ThresholdFilter level="${FILE_APPENDER_LEVEL}" onMatch="ACCEPT" onMismatch="DENY"/>
+            </Filters>
         </File>
     </Appenders>
     <Loggers>
         <Logger name="io.netty" level="WARN" />
-        <Root level="DEBUG">
+        <Root level="${LOG_LEVEL}">
             <AppenderRef ref="Console">
                 <MarkerFilter marker="RAFT_DIAGNOSTIC"
-                              onMatch="DENY"
+                              onMatch="${DIAGNOSTIC_MATCH}"
                               onMismatch="NEUTRAL" />
             </AppenderRef>
             <AppenderRef ref="File"/>
