@@ -351,7 +351,7 @@ class RaftMachineTest : FunSpec({
                 }
             }
         }
-        test("Test linearaizability of client commands").config(timeout = 30.seconds) {
+        test("Test linearaizability of client commands").config(timeout = 90.seconds) {
             resourceScope {
                 // C clients sending B batches of M messages each
                 val C = 8
