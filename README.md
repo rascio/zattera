@@ -1,5 +1,7 @@
 # Zattera
 
+![Build](https://github.com/rascio/zattera/actions/workflows/build-and-verify.yml/badge.svg)
+
 > I'm too lazy to find a better name, so it is just a translation
 
 ## What is it?
