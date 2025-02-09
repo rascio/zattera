@@ -5,7 +5,6 @@ import io.r.raft.protocol.LogEntry
 import io.r.raft.protocol.RaftMessage
 import io.r.raft.protocol.RaftRpc
 
-typealias Query = ByteArray
 interface RaftService {
 
     val node: RaftRpc.ClusterNode
@@ -17,5 +16,5 @@ interface RaftService {
     // Client
     suspend fun request(entry: LogEntry.Entry): Response
 
-    suspend fun query(query: Query): Response
+    suspend fun query(query: ByteArray): Response
 }

@@ -6,15 +6,13 @@ package io.r.kv
 import arrow.fx.coroutines.autoCloseable
 import arrow.fx.coroutines.resourceScope
 import io.r.kv.StringsKeyValueStore.KVCommand
+import io.r.kv.StringsKeyValueStore.KVQuery
 import io.r.raft.client.RaftClusterClient
 import io.r.raft.protocol.RaftRpc
 import io.r.raft.protocol.toClusterNode
 import io.r.raft.transport.ktor.HttpRaftCluster
 import io.r.utils.JacocoExclusionNeedsGenerated
 import kotlinx.coroutines.runBlocking
-import kotlinx.serialization.decodeFromString
-import kotlinx.serialization.encodeToString
-import kotlinx.serialization.json.Json
 import picocli.CommandLine
 import picocli.CommandLine.Command
 import picocli.CommandLine.Option
@@ -82,11 +80,10 @@ class ShellCommand : Callable<Int> {
                     print("${raftClient.connected().describe()}> ")
                     val result = when (val request = scanner.nextCommand()) {
                         null -> continue
-                        is KVCommand -> sendCommand(raftClient, request)
-                        else -> sendQuery(raftClient, request)
+                        is KVCommand -> raftClient.request(request)
+                        is KVQuery -> raftClient.query(request)
                     }
                     result
-                        .map { Json.decodeFromString<StringsKeyValueStore.Response>(it) }
                         .map {
                             when (it) {
                                 is StringsKeyValueStore.Value -> it.value
@@ -100,17 +97,6 @@ class ShellCommand : Callable<Int> {
         }
 
         return 0
-    }
-
-    private suspend fun sendCommand(raftClient: RaftClusterClient<KVCommand>, cmd: KVCommand): Result<String> {
-        return raftClient.request(cmd)
-            .map { it.decodeToString() }
-    }
-
-    private suspend fun sendQuery(raftClient: RaftClusterClient<KVCommand>, query: StringsKeyValueStore.Request): Result<String> {
-        val serializedQuery = Json.encodeToString(query).encodeToByteArray()
-        return raftClient.query(serializedQuery)
-            .map { it.decodeToString() }
     }
 
     private fun RaftRpc.ClusterNode?.describe() =

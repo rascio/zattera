@@ -18,20 +18,20 @@ suspend fun ResourceScope.installRaftTestNode(
     cluster: RaftClusterTestNetwork,
     configuration: RaftMachine.Configuration = RaftMachine.Configuration(),
     start: Boolean = true
-): RaftTestNode<TestCmd, TestQuery> = installRaftTestNode(
+): RaftTestNode<TestCmd, TestQuery, TestResponse> = installRaftTestNode(
     nodeId = nodeId,
     cluster = cluster,
     configuration = configuration,
     start = start,
     stateMachineFactory = { TestingStateMachine() }
 )
-suspend fun <C: StateMachine.Command, Q : StateMachine.Query> ResourceScope.installRaftTestNode(
+suspend fun <C: StateMachine.Command, Q: StateMachine.Query, R: StateMachine.Response> ResourceScope.installRaftTestNode(
     nodeId: NodeId,
     cluster: RaftClusterTestNetwork,
     configuration: RaftMachine.Configuration = RaftMachine.Configuration(),
     start: Boolean = true,
-    stateMachineFactory: () -> StateMachine<C, Q>
-): RaftTestNode<C, Q> = install(
+    stateMachineFactory: () -> StateMachine<C, Q, R>
+): RaftTestNode<C, Q, R> = install(
     acquire = {
         RaftTestNode(
             raftClusterTestNetwork = cluster,
@@ -45,21 +45,21 @@ suspend fun <C: StateMachine.Command, Q : StateMachine.Query> ResourceScope.inst
     },
     release = { n, _ -> n.stop() }
 )
-class RaftTestNode<C : StateMachine.Command, Q : StateMachine.Query> private constructor(
+class RaftTestNode<C : StateMachine.Command, Q : StateMachine.Query, R: StateMachine.Response> private constructor(
     private val raftClusterTestNetwork: RaftClusterTestNetwork,
     private val raftCluster: RaftCluster,
     val configuration: RaftMachine.Configuration,
     private var _log: RaftLog,
     private val scope: CoroutineScope,
-    stateMachine: StateMachine<C, Q>
+    stateMachine: StateMachine<C, Q, R>
 ) {
     companion object {
-        operator fun <C : StateMachine.Command, Q : StateMachine.Query> invoke(
+        operator fun <C : StateMachine.Command, Q : StateMachine.Query, R : StateMachine.Response> invoke(
             raftClusterTestNetwork: RaftClusterTestNetwork,
             nodeId: NodeId,
             configuration: RaftMachine.Configuration,
             scope: CoroutineScope? = null,
-            stateMachine: StateMachine<C, Q>
+            stateMachine: StateMachine<C, Q, R>
         ) = RaftTestNode(
             raftClusterTestNetwork = raftClusterTestNetwork,
             raftCluster = RaftCluster(nodeId, raftClusterTestNetwork),

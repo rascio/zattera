@@ -2,7 +2,6 @@
 
 package io.r.raft
 
-import arrow.atomic.AtomicLong
 import arrow.fx.coroutines.ResourceScope
 import arrow.fx.coroutines.autoCloseable
 import arrow.fx.coroutines.resourceScope
@@ -18,6 +17,7 @@ import io.ktor.server.response.respondText
 import io.ktor.server.routing.get
 import io.ktor.server.routing.route
 import io.ktor.server.routing.routing
+import io.r.counter.SimpleCounter
 import io.r.raft.log.StateMachine
 import io.r.raft.log.inmemory.InMemoryRaftLog
 import io.r.raft.machine.RaftMachine
@@ -33,7 +33,6 @@ import kotlinx.coroutines.CoroutineName
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.runBlocking
-import kotlinx.serialization.Serializable
 import org.apache.logging.log4j.LogManager
 import picocli.CommandLine
 import picocli.CommandLine.Command
@@ -111,7 +110,7 @@ class RestRaftServer : Callable<String> {
     @Option(
         names = ["--state-machine"],
         description = ["The fully qualified name of the state machine"],
-        defaultValue = "io.r.raft.SimpleCounter",
+        defaultValue = "io.r.counter.SimpleCounter",
         required = false
     )
     private var stateMachine: String = SimpleCounter::class.qualifiedName!!
@@ -220,39 +219,13 @@ class RestRaftServer : Callable<String> {
         release = { it, _ -> it.stop() }
     )
 
-    private fun newStateMachine() : StateMachine<*, *> {
+    private fun newStateMachine() : StateMachine<*, *, *> {
         val clazz = Class.forName(stateMachine)
         require(StateMachine::class.java.isAssignableFrom(clazz)) {
             "State machine must implement the StateMachine interface"
         }
         val constructor = clazz.getConstructor()
-        return constructor.newInstance() as StateMachine<*, *>
-    }
-}
-
-@JacocoExclusionNeedsGenerated
-class SimpleCounter : StateMachine<SimpleCounter.Inc, SimpleCounter.Get>{
-
-    @Serializable
-    data object Inc : StateMachine.Command
-    @Serializable
-    data object Get : StateMachine.Query
-
-    private val lastApplied = AtomicLong()
-
-    override val contract = Companion
-
-    override suspend fun apply(message: Inc): ByteArray {
-        // Do nothing for now
-        logger.info(entry("Applied", "client_id" to message))
-        return "ADDED_${lastApplied.incrementAndGet()}"
-            .encodeToByteArray()
-    }
-
-    companion object : StateMachine.Contract<Inc, Get> {
-        override val commandKSerializer = Inc.serializer()
-        override val queryKSerializer = Get.serializer()
-        private val logger = LogManager.getLogger(SimpleCounter::class.java)
+        return constructor.newInstance() as StateMachine<*, *, *>
     }
 }
 

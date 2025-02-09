@@ -9,7 +9,6 @@ import io.kotest.matchers.shouldNotBe
 import io.kotest.matchers.types.shouldBeInstanceOf
 import io.r.kv.StringsKeyValueStore
 import io.r.raft.client.RaftClusterClient
-import io.r.raft.log.StateMachine
 import io.r.raft.machine.RaftTestCluster.Companion.append
 import io.r.raft.protocol.LogEntry.ClientCommand
 import io.r.raft.protocol.LogEntryMetadata
@@ -37,7 +36,6 @@ import kotlinx.coroutines.joinAll
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeout
 import kotlinx.serialization.decodeFromString
-import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import org.apache.logging.log4j.LogManager
 import org.apache.logging.log4j.kotlin.logger
@@ -415,10 +413,8 @@ class RaftMachineTest : FunSpec({
                 cluster.dumpRaftLogs(decode = true)
                 ('A'..('A' + C)).forEach { key ->
                     val string = StringsKeyValueStore.Get("$key")
-                        .toJson()
                         .let { client.query(it) }
                     val response = string.getOrThrow()
-                        .toKvResponse()
                     assertIs<StringsKeyValueStore.Value>(response)
                     val list = response
                         .value
@@ -496,7 +492,7 @@ class RaftMachineTest : FunSpec({
 private fun CoroutineScope.startClientsSendingBatches(
     clients: Int,
     messages: Int,
-    raftClusterClientFactory: () -> RaftClusterClient<StringsKeyValueStore.KVCommand>
+    raftClusterClientFactory: () -> RaftClusterClient<StringsKeyValueStore.KVCommand, StringsKeyValueStore.KVQuery, StringsKeyValueStore.KVResponse>
 ) =
     ('A'..('A' + clients)).map { client ->
         launch(Dispatchers.IO) {
@@ -508,7 +504,6 @@ private fun CoroutineScope.startClientsSendingBatches(
                             .also { logger.info { entry("Client_Send") } }
                             .let { cmd ->
                                 raftClusterClient.request(cmd)
-                                    .map { Json.decodeFromString<StringsKeyValueStore.Response>(it.decodeToString()) }
                                     .onFailure {
                                         logger.error {
                                             entry(
@@ -533,10 +528,3 @@ private fun CoroutineScope.startClientsSendingBatches(
         }
     }
 
-private fun ByteArray.toKvResponse() =
-    this.decodeToString()
-        .let { Json.decodeFromString<StringsKeyValueStore.Response>(it) }
-
-private fun StringsKeyValueStore.Request.toJson() =
-    Json.encodeToString(this)
-        .encodeToByteArray()

@@ -10,15 +10,15 @@ import io.r.raft.transport.RaftCluster
 import io.r.raft.transport.RaftService
 import io.r.utils.logs.entry
 import kotlinx.coroutines.delay
-import kotlinx.serialization.KSerializer
 import kotlinx.serialization.json.Json
 import org.apache.logging.log4j.LogManager
 import java.util.UUID
 import java.util.concurrent.atomic.AtomicLong
+import kotlin.reflect.KSuspendFunction2
 
-class RaftClusterClient<Cmd : StateMachine.Command>(
+class RaftClusterClient<Cmd : StateMachine.Command, Query : StateMachine.Query, Resp: StateMachine.Response>(
     private val peers: RaftCluster.RaftPeers,
-    private val contract: StateMachine.Contract<Cmd, *>,
+    private val contract: StateMachine.Contract<Cmd, Query, Resp>,
     private val configuration: Configuration = Configuration()
 ) {
     private val clientId: UUID = UUID.randomUUID()
@@ -35,29 +35,34 @@ class RaftClusterClient<Cmd : StateMachine.Command>(
 
     fun connected(): RaftRpc.ClusterNode? = leader?.let { peers[it]?.node }
 
-    suspend fun request(command: Cmd): Result<ByteArray> =
-        command.toClientCommand()
-            .let { entry ->
-                send(configuration.retry) { it.request(entry) }
-                    .map { it.value }
-            }
+    suspend fun request(command: Cmd): Result<Resp> =
+        send(configuration.retry, command.toClientCommand(), RaftService::request)
+            .map { it.toClientResponse() }
 
 
-    suspend fun query(query: ByteArray): Result<ByteArray> =
-        send(configuration.retry) { it.query(query) }
-            .map { it.value }
+    suspend fun query(query: Query): Result<Resp> =
+        send(configuration.retry, query.toBytes(), RaftService::query)
+            .map { it.toClientResponse() }
 
     class ClientExecutionException(message: String, cause: Throwable? = null) : Exception(message, cause) {
         override fun fillInStackTrace() = null
     }
 
-    private suspend fun send(retry: Int, exec: suspend (RaftService) -> Response): Result<Response.Success> {
+    /*
+     * Retry management for client requests.
+     * The client will try to send the request to the connected node, if:
+     * - the node is the leader, the request is sent
+     * - the node is not the leader, the client will try to connect to the leader
+     * - the node is unknown, the client will try to connect to a random node
+     * If the request fails, the client will try to send the request to another node.
+     */
+    private suspend fun <T> send(retry: Int, value: T, op: KSuspendFunction2<RaftService, T, Response>): Result<Response.Success> {
         var attempt = 0
         var result = Result.failure<Response.Success>(ClientExecutionException("Never started"))
         while (attempt < retry) {
             val node = getConnectedNode()
             try {
-                when (val response = exec(node)) {
+                when (val response = op(node, value)) {
                     Response.LeaderUnknown -> {
                         logger.debug { entry("leader_unknown", "node" to node.id) }
                         delay(configuration.delay.random())
@@ -111,6 +116,12 @@ class RaftClusterClient<Cmd : StateMachine.Command>(
                     entry("track_messages", "cmd" to this, "id" to it.id)
                 }
             }
+    private fun Query.toBytes() =
+        Json.encodeToString(serializer = contract.queryKSerializer, value = this)
+            .encodeToByteArray()
+
+    private fun Response.Success.toClientResponse() =
+        Json.decodeFromString(deserializer = contract.responseKSerializer, this.value.decodeToString())
 
     companion object {
         private val logger = LogManager.getLogger("RaftClusterClient")
