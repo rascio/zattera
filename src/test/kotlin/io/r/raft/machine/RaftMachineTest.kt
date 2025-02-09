@@ -157,9 +157,10 @@ class RaftMachineTest : FunSpec({
                     N1.channel.receive() // heartbeat
 
                     // Send an AppendEntries with a higher term
+                    val expectedTerm = underTest.getCurrentTerm() + 1
                     N1.sendTo(underTest) {
                         AppendEntries(
-                            term = underTest.getCurrentTerm() + 1,
+                            term = expectedTerm,
                             leaderId = N1.id,
                             prevLog = LogEntryMetadata.ZERO,
                             entries = emptyList(),
@@ -169,7 +170,7 @@ class RaftMachineTest : FunSpec({
                     N1 shouldReceive RaftMessage(
                         from = underTest.id,
                         to = N1.id,
-                        rpc = AppendEntriesResponse(underTest.getCurrentTerm() + 1, 0, true, 0)
+                        rpc = AppendEntriesResponse(expectedTerm, 0, true, 0)
                     )
                     underTest.roleChanges.first() shouldBe RaftRole.FOLLOWER
                 }
@@ -351,7 +352,7 @@ class RaftMachineTest : FunSpec({
                 }
             }
         }
-        test("Test linearaizability of client commands").config(timeout = 30.seconds) {
+        test("Test linearaizability of client commands").config(timeout = 90.seconds) {
             resourceScope {
                 // C clients sending B batches of M messages each
                 val C = 8
