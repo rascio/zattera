@@ -32,11 +32,11 @@ import org.apache.logging.log4j.MarkerManager
 import org.apache.logging.log4j.kotlin.additionalLoggingContext
 import java.util.concurrent.ConcurrentHashMap
 
-class RaftMachine<C: StateMachine.Contract<*, *>>(
+class RaftMachine<C: StateMachine.Contract<*, *, *>>(
     private val configuration: Configuration,
     private val cluster: RaftCluster,
     private val log: RaftLog,
-    private val stateMachine: StateMachineAdapter<*, *, C>,
+    private val stateMachine: StateMachineAdapter<*, *, *, C>,
     private val scope: CoroutineScope = CoroutineScope(Dispatchers.IO),
     private val input: Channel<RaftMessage> = Channel(capacity = Channel.BUFFERED)
 ) {

@@ -7,5 +7,10 @@ package io.r.utils
  */
 @MustBeDocumented
 @Retention(AnnotationRetention.RUNTIME)
-@Target(AnnotationTarget.TYPE, AnnotationTarget.FILE, AnnotationTarget.CLASS)
+@Target(
+    AnnotationTarget.TYPE,
+    AnnotationTarget.FILE,
+    AnnotationTarget.CLASS,
+    AnnotationTarget.FUNCTION
+)
 annotation class JacocoExclusionNeedsGenerated()

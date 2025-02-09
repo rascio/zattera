@@ -11,7 +11,7 @@
 
         </Async>
 
-        <File name="File" fileName=".logs/test-logs2.out" append="false">
+        <File name="File" fileName=".logs/test-logs.out" append="false">
             <PatternLayout pattern="%d{yyyy-MM-dd HH:mm:ss.SSS} | %5level | [%10.10t] | %15.15c{1} | NodeId=%X{NodeId} | %m | %NDC%n"/>
         </File>
     </Appenders>

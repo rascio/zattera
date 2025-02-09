@@ -11,7 +11,6 @@ import io.r.raft.machine.Response
 import io.r.raft.protocol.LogEntry
 import io.r.raft.protocol.RaftMessage
 import io.r.raft.protocol.RaftRpc
-import io.r.raft.transport.Query
 import io.r.raft.transport.RaftService
 import io.r.utils.logs.entry
 import kotlinx.coroutines.Dispatchers
@@ -81,7 +80,7 @@ class HttpRaftService(
             .let { json.decodeFromString<Response>(it) }
     }
 
-    override suspend fun query(query: Query): Response {
+    override suspend fun query(query: ByteArray): Response {
         val response = withContext(Dispatchers.IO) {
             client.post("http://${node.host}:${node.port}/raft/query") {
                 contentType(ContentType.Application.Json)
