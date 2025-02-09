@@ -1,8 +1,9 @@
-package io.r.kv
+package io.r.raft.cli
 
 
 import arrow.fx.coroutines.autoCloseable
 import arrow.fx.coroutines.resourceScope
+import io.r.kv.StringsKeyValueStore
 import io.r.kv.StringsKeyValueStore.KVCommand
 import io.r.kv.StringsKeyValueStore.KVQuery
 import io.r.kv.StringsKeyValueStore.KVRequest
@@ -10,40 +11,29 @@ import io.r.raft.client.RaftClusterClient
 import io.r.raft.protocol.RaftRpc
 import io.r.raft.protocol.toClusterNode
 import io.r.raft.transport.ktor.HttpRaftCluster
-import io.r.utils.JacocoExclusionNeedsGenerated
+import io.r.utils.requireMatch
 import kotlinx.coroutines.runBlocking
 import picocli.CommandLine
 import picocli.CommandLine.Command
+import picocli.CommandLine.Model.CommandSpec
 import picocli.CommandLine.Option
+import picocli.CommandLine.Spec
 import java.util.Scanner
 import java.util.concurrent.Callable
-import kotlin.system.exitProcess
 
-
-@JacocoExclusionNeedsGenerated
-fun main(args: Array<String>) {
-    val exitCode = CommandLine(KeyValueCli()).execute(*args)
-    exitProcess(exitCode)
-}
 
 @Command(
-    name = "kv-store",
-    descriptionHeading = """
-        Key-Value Store CLI client.
-    """,
-    subcommands = [
-        KVShellCommand::class,
-    ]
-)
-class KeyValueCli
-
-@Command(
-    name = "shell",
+    name = "kv-shell",
     description = ["Start a shell to interact with the key-value store"]
 )
 class KVShellCommand : Callable<Int> {
+
+    @Spec
+    private lateinit var spec: CommandSpec
+
     @Option(names = ["--peer"], description = ["The host to connect to"], required = true)
     lateinit var peers: List<String>
+
 
     @Option(names = ["--retry"], description = ["The number of retries"], defaultValue = "10")
     var retry: Int = 10
@@ -64,6 +54,8 @@ class KVShellCommand : Callable<Int> {
 
 
     override fun call(): Int {
+        peers.forEach { spec.requireMatch(it, PEER_PATTERN) }
+
         runBlocking { run() }
         return 0
     }

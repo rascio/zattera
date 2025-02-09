@@ -1,10 +1,10 @@
-package io.r.kv
+package io.r.raft.cli
 
 import io.kotest.assertions.withClue
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.matchers.result.shouldBeSuccess
 import io.kotest.matchers.shouldBe
-import io.r.raft.RestRaftServer
+import io.r.kv.StringsKeyValueStore
 import kotlinx.coroutines.delay
 import picocli.CommandLine
 import java.io.ByteArrayInputStream
@@ -37,8 +37,7 @@ class KeyValueCliTest : FunSpec({
         val oldInput = System.`in`
         System.setIn(ByteArrayInputStream(input.toByteArray()))
         try {
-            CommandLine(KeyValueCli()).execute(
-                "shell",
+            CommandLine(KVShellCommand()).execute(
                 "--peer", "N0=localhost:18080",
                 "--peer", "N1=localhost:18081",
                 "--peer", "N2=localhost:18082"

@@ -1,6 +1,6 @@
 @file:JacocoExclusionNeedsGenerated
 
-package io.r.raft
+package io.r.raft.cli
 
 import arrow.fx.coroutines.ResourceScope
 import arrow.fx.coroutines.autoCloseable
@@ -29,39 +29,40 @@ import io.r.raft.transport.ktor.HttpRaftCluster
 import io.r.raft.transport.ktor.HttpRaftController
 import io.r.utils.JacocoExclusionNeedsGenerated
 import io.r.utils.logs.entry
+import io.r.utils.requireMatch
 import kotlinx.coroutines.CoroutineName
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.runBlocking
 import org.apache.logging.log4j.LogManager
-import picocli.CommandLine
 import picocli.CommandLine.Command
+import picocli.CommandLine.Model.CommandSpec
 import picocli.CommandLine.Option
 import picocli.CommandLine.Parameters
+import picocli.CommandLine.Spec
 import java.util.concurrent.Callable
-import kotlin.system.exitProcess
-
-@JacocoExclusionNeedsGenerated
-fun main(args: Array<String>) {
-    val exitCode = CommandLine(RestRaftServer()).execute(*args)
-    exitProcess(exitCode)
-}
 
 @Command(
-    name = "rest-raft-server",
-    descriptionHeading = """
-        RestRaftServer
-        =============
-        
-        Start a Raft server with a REST API.
+    name = "server",
+    header = [
+        "Raft server with a REST API",
+    ],
+    description = [
+        """
+        Start the HTTP server for the Raft consensus algorithm.
         Useful endpoints are:
-        - POST /entries to append a new entry
-        - GET /entries to get all entries
-    """,
+            - POST /request used by the client to send commands
+            - GET /entries to get all entries in the node log
+        The StateMachine to execute can be configured with the --state-machine option.
+        """
+    ]
 )
 class RestRaftServer : Callable<String> {
 
     private val logger = LogManager.getLogger(RestRaftServer::class.java)
+
+    @Spec
+    private lateinit var spec: CommandSpec
 
     @Parameters(
         index = "0",
@@ -71,15 +72,17 @@ class RestRaftServer : Callable<String> {
 
     @Option(
         names = ["--port"],
-        description = ["The port of the server"]
+        description = ["The port of the server"],
+        required = true
     )
     private var port: Int = -1
 
     @Option(
         names = ["--peer"],
-        description = ["The list of peers, example value: N1=localhost:8081"]
+        description = ["The list of peers, example value: N1=localhost:8081"],
+        required = true
     )
-    private var peers: List<String> = emptyList()
+    lateinit var peers: List<String>
 
     @Option(
         names = ["--election-timeout"],
@@ -116,9 +119,8 @@ class RestRaftServer : Callable<String> {
     private var stateMachine: String = SimpleCounter::class.qualifiedName!!
 
     override fun call(): String {
-        if (debugMessages && "logLevel" !in System.getProperties()) {
-            System.setProperty("logLevel", "INFO")
-        }
+        peers.forEach { spec.requireMatch(it, PEER_PATTERN) }
+
         logger.info(entry("Starting server", "id" to id, "port" to port))
         runBlocking(Dispatchers.IO + CoroutineName("Server")) {
             resourceScope {
@@ -219,7 +221,7 @@ class RestRaftServer : Callable<String> {
         release = { it, _ -> it.stop() }
     )
 
-    private fun newStateMachine() : StateMachine<*, *, *> {
+    private fun newStateMachine(): StateMachine<*, *, *> {
         val clazz = Class.forName(stateMachine)
         require(StateMachine::class.java.isAssignableFrom(clazz)) {
             "State machine must implement the StateMachine interface"

@@ -79,8 +79,8 @@ echo "Starting node $node on port $port"
 #launch the maven command with tee if store_log is enabled
 if [ "$store_log" = true ]; then
   mvn -q process-resources exec:java \
-  -Dexec.mainClass=io.r.raft.MainKt -Dexec.args="$program_args" | tee ".logs/N$node.log"
+  -Dexec.mainClass=io.r.raft.cli.MainKt -Dexec.args="$program_args" | tee ".logs/N$node.log"
 else
   mvn -q -Dstyle.color=always process-resources exec:java \
-  -Dexec.mainClass=io.r.raft.MainKt -Dexec.args="$program_args"
+  -Dexec.mainClass=io.r.raft.cli.MainKt -Dexec.args="server $program_args"
 fi

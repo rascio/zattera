@@ -4,6 +4,8 @@ import io.r.raft.protocol.LogEntry
 import kotlinx.coroutines.withContext
 import org.apache.commons.codec.digest.MurmurHash3
 import org.apache.logging.log4j.kotlin.additionalLoggingContext
+import picocli.CommandLine.Model.CommandSpec
+import picocli.CommandLine.ParameterException
 
 fun ByteArray.encodeBase64(): String = java.util.Base64.getEncoder().encodeToString(this)
 fun ByteArray.murmur128(): LongArray = MurmurHash3.hash128x64(this, 0, this.size, 0)
@@ -29,3 +31,9 @@ suspend inline fun <T> loggingCtx(
 
 fun LongArray.toHex() =
     joinToString("") { "%02x".format(it) }
+
+fun CommandSpec.requireMatch(value: String, pattern: Regex) {
+    if (!pattern.matches(value)) {
+        throw ParameterException(commandLine(), "Invalid value [$value] not matching pattern $pattern")
+    }
+}

@@ -11,7 +11,7 @@ A "bad" implementation of a raft consensus algorithm, just for fun.
 `scripts/` folder contains scripts to start nodes/cluster and clients:
 
 - `start-node.sh`: Starts a node with the given parameters, support a simple counter and a KV store
-- `key-value.sh`: CLI to interact with the KV store
+- `kv-shell.sh`: CLI to interact with the KV store
 
 both support `-h` to show the help message.
 
@@ -25,9 +25,9 @@ both support `-h` to show the help message.
 
 #### Start the KV store CLI
 ```shell
-./scripts/key-value.sh shell
+./scripts/kv-shell.sh
 ```
-
+Type `help` to see the available commands
 
 ### Interact with Server
 
