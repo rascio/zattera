@@ -2,6 +2,7 @@ package io.r.raft.machine
 
 import io.r.raft.log.StateMachine
 import io.r.raft.protocol.LogEntry
+import io.r.utils.concurrency.ReadWriteLock
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
@@ -9,7 +10,6 @@ import kotlinx.coroutines.launch
 import kotlinx.serialization.KSerializer
 import kotlinx.serialization.json.Json
 import java.util.UUID
-import java.util.concurrent.ConcurrentHashMap
 
 class StateMachineAdapter<
     C : StateMachine.Command,
@@ -25,18 +25,21 @@ class StateMachineAdapter<
 
     private class Entry(val sequence: Long, val result: ByteArray, val expiration: Long)
 
-    private val cache = ConcurrentHashMap<UUID, Entry>()
+    private val cache = mutableMapOf<UUID, Entry>()
+    private val lock = ReadWriteLock()
 
     init {
         parent.launch {
             while (isActive) {
-                cache.entries.removeIf { (_, entry) -> entry.expiration < System.currentTimeMillis() }
+                lock.withWriteLock {
+                    cache.entries.removeIf { (_, entry) -> entry.expiration < System.currentTimeMillis() }
+                }
                 delay(60000)
             }
         }
     }
 
-    suspend fun apply(entry: LogEntry.ClientCommand): ByteArray {
+    suspend fun apply(entry: LogEntry.ClientCommand): ByteArray = lock.withWriteLock {
         val cached = cache[entry.clientId]
 
         return when {
@@ -54,7 +57,7 @@ class StateMachineAdapter<
         }
     }
 
-    suspend fun read(entry: ByteArray): ByteArray {
+    suspend fun read(entry: ByteArray): ByteArray = lock.withReadLock {
         val query = parse(stateMachine.contract.queryKSerializer, entry)
         return Json.encodeToString(stateMachine.contract.responseKSerializer, stateMachine.read(query))
             .encodeToByteArray()
