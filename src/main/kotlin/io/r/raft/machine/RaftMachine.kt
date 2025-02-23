@@ -10,18 +10,21 @@ import io.r.raft.protocol.RaftRole
 import io.r.raft.transport.RaftCluster
 import io.r.utils.loggingCtx
 import io.r.utils.logs.entry
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.isActive
+import kotlinx.coroutines.job
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.selects.onTimeout
 import kotlinx.coroutines.selects.select
@@ -31,8 +34,9 @@ import org.apache.logging.log4j.Logger
 import org.apache.logging.log4j.MarkerManager
 import org.apache.logging.log4j.kotlin.additionalLoggingContext
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.atomic.AtomicBoolean
 
-class RaftMachine<C: StateMachine.Contract<*, *, *>>(
+class RaftMachine<C : StateMachine.Contract<*, *, *>>(
     private val configuration: Configuration,
     private val cluster: RaftCluster,
     private val log: RaftLog,
@@ -86,6 +90,7 @@ class RaftMachine<C: StateMachine.Contract<*, *, *>>(
 
     @OptIn(ExperimentalCoroutinesApi::class)
     fun start() {
+
         logger.info(entry("Starting_RaftMachine", "job" to job))
         job = scope.launch(additionalLoggingContext(map = mapOf("NodeId" to cluster.id))) {
             transitionTo(RaftRole.FOLLOWER)
@@ -118,6 +123,8 @@ class RaftMachine<C: StateMachine.Contract<*, *, *>>(
                         }
                     }
                 }
+            } catch (_: StopRaftMachine) {
+                // stop() was called
             } catch (t: Throwable) {
                 logger.error(entry("RaftMachine_Error", "error" to t.message), t)
             } finally {
@@ -274,16 +281,26 @@ class RaftMachine<C: StateMachine.Contract<*, *, *>>(
         }
     }
 
+    private class StopRaftMachine : CancellationException("RaftMachine is stopped") {
+        override fun fillInStackTrace(): Throwable = this
+    }
+
     suspend fun stop() {
-        incomingCommands.cancel()
-        waitingForCommit.forEach {
-            it.value.cancel("Stopping RaftMachine")
-        }
-        waitingForCommit.clear()
+        val stop = StopRaftMachine()
+        // stop accepting new commands
+        incomingCommands.close(stop)
+
+        // stop the main loop
         job?.run {
-            cancel("Stopping RaftMachine")
+            cancel(stop)
             join()
         }
+        job = null
+
+        waitingForCommit.forEach {
+            it.value.cancel()
+        }
+        waitingForCommit.clear()
     }
 
     private suspend fun transitionTo(newRole: RaftRole): Role {
