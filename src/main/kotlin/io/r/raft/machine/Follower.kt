@@ -45,7 +45,7 @@ class Follower(
                     log.append(message.rpc.prevLog, message.rpc.entries)
                 }
             }
-            val rcp = when (result) {
+            val rpc = when (result) {
                 is AppendResult.Appended -> {
                     serverState.commitIndex = result.index
                     if (message.rpc.entries.isNotEmpty()) {
@@ -93,7 +93,7 @@ class Follower(
                     )
                 }
             }
-            cluster.send(to = message.from, rpc = rcp)
+            cluster.send(to = message.from, rpc = rpc)
         }
         else -> {
             logger.debug(DIAGNOSTIC_MARKER) {

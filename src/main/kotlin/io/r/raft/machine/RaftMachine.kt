@@ -31,6 +31,7 @@ import kotlinx.coroutines.selects.select
 import kotlinx.coroutines.withTimeout
 import org.apache.logging.log4j.LogManager
 import org.apache.logging.log4j.Logger
+import org.apache.logging.log4j.Marker
 import org.apache.logging.log4j.MarkerManager
 import org.apache.logging.log4j.kotlin.additionalLoggingContext
 import java.util.concurrent.ConcurrentHashMap
@@ -361,7 +362,7 @@ class RaftMachine<C : StateMachine.Contract<*, *, *>>(
     )
 
     companion object {
-        val DIAGNOSTIC_MARKER = MarkerManager.getMarker("RAFT_DIAGNOSTIC")
+        val DIAGNOSTIC_MARKER: Marker = MarkerManager.getMarker("RAFT_DIAGNOSTIC")
         private val logger: Logger = LogManager.getLogger(RaftMachine::class.java)
 
     }
