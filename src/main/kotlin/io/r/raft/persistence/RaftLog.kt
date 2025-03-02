@@ -1,4 +1,4 @@
-package io.r.raft.log
+package io.r.raft.persistence
 
 import io.r.raft.protocol.Index
 import io.r.raft.protocol.LogEntry

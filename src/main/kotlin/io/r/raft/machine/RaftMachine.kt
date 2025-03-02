@@ -1,8 +1,8 @@
 package io.r.raft.machine
 
-import io.r.raft.log.RaftLog
-import io.r.raft.log.RaftLog.Companion.getLastMetadata
-import io.r.raft.log.StateMachine
+import io.r.raft.persistence.RaftLog
+import io.r.raft.persistence.RaftLog.Companion.getLastMetadata
+import io.r.raft.persistence.StateMachine
 import io.r.raft.machine.StateMachineAdapter.Companion.isValidCommand
 import io.r.raft.protocol.LogEntry
 import io.r.raft.protocol.RaftMessage
@@ -17,14 +17,12 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.cancel
-import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.isActive
-import kotlinx.coroutines.job
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.selects.onTimeout
 import kotlinx.coroutines.selects.select
@@ -35,7 +33,6 @@ import org.apache.logging.log4j.Marker
 import org.apache.logging.log4j.MarkerManager
 import org.apache.logging.log4j.kotlin.additionalLoggingContext
 import java.util.concurrent.ConcurrentHashMap
-import java.util.concurrent.atomic.AtomicBoolean
 
 class RaftMachine<C : StateMachine.Contract<*, *, *>>(
     private val configuration: Configuration,

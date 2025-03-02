@@ -1,8 +1,8 @@
-package io.r.raft.log.inmemory
+package io.r.raft.persistence.inmemory
 
 import arrow.core.continuations.AtomicRef
-import io.r.raft.log.RaftLog
-import io.r.raft.log.RaftLog.Companion.AppendResult
+import io.r.raft.persistence.RaftLog
+import io.r.raft.persistence.RaftLog.Companion.AppendResult
 import io.r.raft.protocol.Index
 import io.r.raft.protocol.LogEntry
 import io.r.raft.protocol.LogEntryMetadata

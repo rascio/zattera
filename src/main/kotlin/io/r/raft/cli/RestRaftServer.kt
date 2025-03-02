@@ -18,8 +18,8 @@ import io.ktor.server.routing.get
 import io.ktor.server.routing.route
 import io.ktor.server.routing.routing
 import io.r.counter.SimpleCounter
-import io.r.raft.log.StateMachine
-import io.r.raft.log.inmemory.InMemoryRaftLog
+import io.r.raft.persistence.StateMachine
+import io.r.raft.persistence.inmemory.InMemoryRaftLog
 import io.r.raft.machine.RaftMachine
 import io.r.raft.machine.StateMachineAdapter
 import io.r.raft.protocol.LogEntry

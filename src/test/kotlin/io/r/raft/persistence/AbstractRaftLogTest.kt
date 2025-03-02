@@ -1,9 +1,9 @@
-package io.r.raft.log
+package io.r.raft.persistence
 
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.matchers.shouldBe
-import io.r.raft.log.RaftLog.Companion.AppendResult
-import io.r.raft.log.RaftLog.Companion.getLastMetadata
+import io.r.raft.persistence.RaftLog.Companion.AppendResult
+import io.r.raft.persistence.RaftLog.Companion.getLastMetadata
 import io.r.raft.protocol.LogEntry
 import io.r.raft.protocol.LogEntryMetadata
 import io.r.raft.protocol.NodeId

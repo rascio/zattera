@@ -1,7 +1,7 @@
 package io.r.raft.machine
 
 import arrow.atomic.AtomicLong
-import io.r.raft.log.StateMachine
+import io.r.raft.persistence.StateMachine
 import io.r.raft.protocol.LogEntry
 import io.r.utils.logs.entry
 import kotlinx.coroutines.yield

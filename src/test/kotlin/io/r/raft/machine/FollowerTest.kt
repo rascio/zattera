@@ -2,7 +2,7 @@ package io.r.raft.machine
 
 import arrow.fx.coroutines.resourceScope
 import io.kotest.core.spec.style.FunSpec
-import io.r.raft.log.RaftLog.Companion.getLastMetadata
+import io.r.raft.persistence.RaftLog.Companion.getLastMetadata
 import io.r.raft.protocol.LogEntryMetadata
 import io.r.raft.protocol.RaftMessage
 import io.r.raft.protocol.RaftRole

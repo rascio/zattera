@@ -1,7 +1,7 @@
 package io.r.raft.machine
 
-import io.r.raft.log.RaftLog
-import io.r.raft.log.RaftLog.Companion.AppendResult
+import io.r.raft.persistence.RaftLog
+import io.r.raft.persistence.RaftLog.Companion.AppendResult
 import io.r.raft.machine.RaftMachine.Companion.DIAGNOSTIC_MARKER
 import io.r.raft.protocol.LogEntry
 import io.r.raft.protocol.RaftMessage

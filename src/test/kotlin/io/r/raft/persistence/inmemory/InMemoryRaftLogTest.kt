@@ -1,10 +1,10 @@
-package io.r.raft.log.inmemory
+package io.r.raft.persistence.inmemory
 
 import io.r.raft.protocol.LogEntry
 import io.r.raft.protocol.NodeId
 import io.r.raft.protocol.Term
-import io.r.raft.log.AbstractRaftLogTest
-import io.r.raft.log.RaftLog
+import io.r.raft.persistence.AbstractRaftLogTest
+import io.r.raft.persistence.RaftLog
 import java.util.TreeMap
 
 class InMemoryRaftLogTest : AbstractRaftLogTest() {

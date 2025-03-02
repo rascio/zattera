@@ -1,9 +1,9 @@
 package io.r.raft.machine
 
 import arrow.fx.coroutines.ResourceScope
-import io.r.raft.log.RaftLog
-import io.r.raft.log.StateMachine
-import io.r.raft.log.inmemory.InMemoryRaftLog
+import io.r.raft.persistence.RaftLog
+import io.r.raft.persistence.StateMachine
+import io.r.raft.persistence.inmemory.InMemoryRaftLog
 import io.r.raft.protocol.LogEntryMetadata
 import io.r.raft.protocol.NodeId
 import io.r.raft.protocol.RaftRole

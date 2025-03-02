@@ -3,7 +3,7 @@ package io.r.kv
 import io.r.kv.StringsKeyValueStore.KVCommand
 import io.r.kv.StringsKeyValueStore.KVQuery
 import io.r.kv.StringsKeyValueStore.KVResponse
-import io.r.raft.log.StateMachine
+import io.r.raft.persistence.StateMachine
 import io.r.utils.logs.entry
 import kotlinx.serialization.Serializable
 import org.apache.logging.log4j.LogManager
