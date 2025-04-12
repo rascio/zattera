@@ -8,8 +8,6 @@ import io.r.raft.protocol.LogEntryMetadata
 import io.r.raft.protocol.NodeId
 import io.r.raft.protocol.Term
 import io.r.utils.logs.entry
-import io.r.utils.murmur128
-import io.r.utils.toHex
 import kotlinx.serialization.StringFormat
 import org.apache.logging.log4j.LogManager
 import org.apache.logging.log4j.Logger

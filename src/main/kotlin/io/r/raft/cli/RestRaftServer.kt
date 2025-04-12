@@ -18,10 +18,12 @@ import io.ktor.server.routing.get
 import io.ktor.server.routing.route
 import io.ktor.server.routing.routing
 import io.r.counter.SimpleCounter
-import io.r.raft.persistence.StateMachine
-import io.r.raft.persistence.inmemory.InMemoryRaftLog
 import io.r.raft.machine.RaftMachine
 import io.r.raft.machine.StateMachineAdapter
+import io.r.raft.persistence.RaftLog
+import io.r.raft.persistence.StateMachine
+import io.r.raft.persistence.h2.MVStoreRaftLog
+import io.r.raft.persistence.inmemory.InMemoryRaftLog
 import io.r.raft.protocol.LogEntry
 import io.r.raft.protocol.toClusterNode
 import io.r.raft.transport.RaftCluster
@@ -34,12 +36,15 @@ import kotlinx.coroutines.CoroutineName
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.runBlocking
+import kotlinx.serialization.json.Json
 import org.apache.logging.log4j.LogManager
+import org.h2.mvstore.MVStore
 import picocli.CommandLine.Command
 import picocli.CommandLine.Model.CommandSpec
 import picocli.CommandLine.Option
 import picocli.CommandLine.Parameters
 import picocli.CommandLine.Spec
+import java.io.File
 import java.util.concurrent.Callable
 
 @Command(
@@ -118,6 +123,13 @@ class RestRaftServer : Callable<String> {
     )
     private var stateMachine: String = SimpleCounter::class.qualifiedName!!
 
+    @Option(
+        names = ["--raft-log-file"],
+        description = ["The file to store the raft log"],
+        required = false
+    )
+    private var raftLogFile: File? = null
+
     override fun call(): String {
         peers.forEach { spec.requireMatch(it, PEER_PATTERN) }
 
@@ -131,7 +143,7 @@ class RestRaftServer : Callable<String> {
     }
 
     private suspend fun ResourceScope.execute() {
-        val raftLog = InMemoryRaftLog()
+        val raftLog = installRaftLog()
 
         val httpRaftClusterPeers = autoCloseable { HttpRaftCluster() }
         val raftCluster = RaftCluster(id, httpRaftClusterPeers, debugMessages)
@@ -156,9 +168,27 @@ class RestRaftServer : Callable<String> {
         http.start(wait = true)
     }
 
+    private suspend fun ResourceScope.installRaftLog() =
+        when {
+            raftLogFile == null -> {
+                logger.info(entry("using_in_memory_log"))
+                InMemoryRaftLog()
+            }
+            else -> {
+                val store = installLogMVStore()
+                logger.info(entry("using_mvstore_log", "file" to raftLogFile!!.absolutePath))
+                MVStoreRaftLog(store, Json)
+            }
+        }
+
+    private suspend fun ResourceScope.installLogMVStore() = install(
+        acquire = { MVStore.open(raftLogFile!!.absolutePath) },
+        release = { store, _ -> store.close() }
+    )
+
     private suspend fun ResourceScope.installHttpServer(
         raftClusterNode: HttpRaftController,
-        raftLog: InMemoryRaftLog
+        raftLog: RaftLog
     ) = install(
         acquire = {
             embeddedServer(Netty, port = port) {
@@ -181,7 +211,7 @@ class RestRaftServer : Callable<String> {
 
     private fun Application.installRoutes(
         raftClusterNode: HttpRaftController,
-        raftLog: InMemoryRaftLog
+        raftLog: RaftLog
     ) {
         routing {
             get("/status") {
@@ -200,7 +230,7 @@ class RestRaftServer : Callable<String> {
 
     private suspend fun ResourceScope.installRaftMachine(
         raftCluster: RaftCluster,
-        raftLog: InMemoryRaftLog,
+        raftLog: RaftLog,
         coroutineScope: CoroutineScope
     ) = install(
         acquire = {
