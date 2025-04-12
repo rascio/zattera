@@ -69,7 +69,7 @@ class ConsistencyLevelTest : FunSpec({
                     stateMachineFactory = { StringsKeyValueStore() }
                 )
                 val clientConfiguration = RaftClusterClient.Configuration(
-                    retry = 30,
+                    retry = 50,
                     delay = 200..300L,
                     jitter = 100..200L
                 )

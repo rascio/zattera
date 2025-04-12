@@ -96,7 +96,11 @@ class RaftMachine<C : StateMachine.Contract<*, *, *>>(
                 logger.debug("RaftMachine_Started")
                 while (isActive) {
                     logger.debug(DIAGNOSTIC_MARKER) {
-                        entry("RaftMachine_Loop", "role" to _role.value::class.simpleName, "state" to serverState)
+                        entry(
+                            "RaftMachine_Loop",
+                            "role" to _role.value::class.simpleName,
+                            "state" to serverState
+                        )
                     }
                     applyCommittedEntries()
 
@@ -173,7 +177,7 @@ class RaftMachine<C : StateMachine.Contract<*, *, *>>(
             }
 
             else -> {
-                when (val leader = serverState.leader) {
+                when (val leader = serverState.currentLeader) {
                     null -> Response.LeaderUnknown
                     else -> Response.NotALeader(cluster.getNode(leader).node)
                 }
@@ -214,7 +218,7 @@ class RaftMachine<C : StateMachine.Contract<*, *, *>>(
             }
 
             else -> {
-                val error = when (val leader = serverState.leader) {
+                val error = when (val leader = serverState.currentLeader) {
                     null -> Response.LeaderUnknown
                     else -> Response.NotALeader(cluster.getNode(leader).node)
                 }
@@ -276,6 +280,13 @@ class RaftMachine<C : StateMachine.Contract<*, *, *>>(
                     if (result != null) releaseCommit(it, result)
                 }
             }
+            /*
+             if (log.getSize() > config.snapshotThreshold) {
+                val snapshot = stateMachine.snapshot()
+                val metadata = log.getMetadata(serverState.lastApplied)
+                log.compact(snapshot, metadata)
+             }
+             */
         }
     }
 
@@ -330,7 +341,8 @@ class RaftMachine<C : StateMachine.Contract<*, *, *>>(
          * Timeout for the queries that are waiting for the leader
          * to confirm it is still the leader
          */
-        val pendingQueryTimeout: Long = 1000
+        val pendingQueryTimeout: Long = 1000,
+        val snapshotChunkSize: Int = 1024,
     )
 
     private fun createFollower(serverState: ServerState = _role.value.serverState) = Follower(

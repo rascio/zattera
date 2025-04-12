@@ -5,7 +5,6 @@ import io.r.raft.protocol.Index
 import io.r.raft.protocol.NodeId
 import io.r.raft.protocol.RaftMessage
 import io.r.raft.protocol.RaftRole
-import io.r.raft.protocol.Term
 import io.r.raft.transport.RaftCluster
 
 typealias RoleTransition = suspend (RaftRole) -> Role
@@ -13,9 +12,7 @@ typealias RoleTransition = suspend (RaftRole) -> Role
 data class ServerState(
     var commitIndex: Index,
     var lastApplied: Index,
-    var leader: NodeId? = null,
-    var term: Term = 0L,
-    var votedFor: NodeId? = null
+    var currentLeader: NodeId? = null
 )
 
 sealed class Role {

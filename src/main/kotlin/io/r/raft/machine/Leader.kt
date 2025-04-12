@@ -1,8 +1,8 @@
 package io.r.raft.machine
 
+import io.r.raft.machine.RaftMachine.Companion.DIAGNOSTIC_MARKER
 import io.r.raft.persistence.RaftLog
 import io.r.raft.persistence.RaftLog.Companion.getLastMetadata
-import io.r.raft.machine.RaftMachine.Companion.DIAGNOSTIC_MARKER
 import io.r.raft.protocol.Index
 import io.r.raft.protocol.LogEntry
 import io.r.raft.protocol.LogEntryMetadata
@@ -43,7 +43,7 @@ class Leader(
 
     override suspend fun onEnter() {
         check(heartbeat == null) { "Heartbeat already started" }
-        serverState.leader = cluster.id
+        serverState.currentLeader = cluster.id
         peers += cluster.peers
             .associateWith { PeerState(log.getLastIndex() + 1, 0) }
 
@@ -89,7 +89,7 @@ class Leader(
         logger.debug(entry("Stopping_Heartbeat"))
         heartbeat?.cancel()
         heartbeat = null
-        serverState.leader = null
+        serverState.currentLeader = null
     }
 
     override suspend fun onReceivedMessage(message: RaftMessage) {
