@@ -1,8 +1,9 @@
 package io.r.raft.machine
 
-import io.r.raft.log.RaftLog
-import io.r.raft.log.RaftLog.Companion.AppendResult
+import io.r.raft.persistence.RaftLog
+import io.r.raft.persistence.RaftLog.Companion.AppendResult
 import io.r.raft.machine.RaftMachine.Companion.DIAGNOSTIC_MARKER
+import io.r.raft.persistence.RaftLog.Companion.getLastMetadata
 import io.r.raft.protocol.LogEntry
 import io.r.raft.protocol.RaftMessage
 import io.r.raft.protocol.RaftRole
@@ -11,6 +12,7 @@ import io.r.raft.transport.RaftCluster
 import io.r.utils.logs.entry
 import org.apache.logging.log4j.LogManager
 import org.apache.logging.log4j.Logger
+import kotlin.math.min
 import kotlin.random.Random
 
 class Follower(
@@ -27,8 +29,10 @@ class Follower(
         is RaftRpc.RequestVote -> {
             val granted = message.rpc.term >= log.getTerm()
                 && log.getVotedFor().let { it == null || it == message.from }
-                && message.rpc.lastLog >= log.getMetadata(serverState.commitIndex)!!
-            log.setVotedFor(message.from)
+                && message.rpc.lastLog >= log.getLastMetadata()
+            if (granted) {
+                log.setVotedFor(message.from, message.rpc.term)
+            }
             cluster.send(
                 to = message.from,
                 rpc = RaftRpc.RequestVoteResponse(
@@ -41,13 +45,15 @@ class Follower(
             val result = when {
                 message.rpc.term < log.getTerm() -> null
                 else -> {
-                    serverState.leader = message.from
+                    serverState.currentLeader = message.from
                     log.append(message.rpc.prevLog, message.rpc.entries)
                 }
             }
-            val rcp = when (result) {
+            val rpc = when (result) {
                 is AppendResult.Appended -> {
-                    serverState.commitIndex = result.index
+                    if(message.rpc.leaderCommit > serverState.commitIndex) {
+                        serverState.commitIndex = min(message.rpc.leaderCommit, result.index)
+                    }
                     if (message.rpc.entries.isNotEmpty()) {
                         logger.debug {
                             entry(
@@ -93,7 +99,7 @@ class Follower(
                     )
                 }
             }
-            cluster.send(to = message.from, rpc = rcp)
+            cluster.send(to = message.from, rpc = rpc)
         }
         else -> {
             logger.debug(DIAGNOSTIC_MARKER) {

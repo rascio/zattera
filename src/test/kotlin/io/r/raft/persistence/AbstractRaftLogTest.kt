@@ -1,9 +1,9 @@
-package io.r.raft.log
+package io.r.raft.persistence
 
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.matchers.shouldBe
-import io.r.raft.log.RaftLog.Companion.AppendResult
-import io.r.raft.log.RaftLog.Companion.getLastMetadata
+import io.r.raft.persistence.RaftLog.Companion.AppendResult
+import io.r.raft.persistence.RaftLog.Companion.getLastMetadata
 import io.r.raft.protocol.LogEntry
 import io.r.raft.protocol.LogEntryMetadata
 import io.r.raft.protocol.NodeId
@@ -87,7 +87,7 @@ abstract class AbstractRaftLogTest : FunSpec() {
                 val log = createLogFromState(entries = entries)
                 log.getEntries(8L, 2) shouldBe listOf(entries[7], entries[8])
             }
-            test("should return the sublit of entries from the given index") {
+            test("should return the sublist of entries from the given index") {
                 val N = 10
                 val F = 3
                 val size = 4
@@ -140,9 +140,15 @@ abstract class AbstractRaftLogTest : FunSpec() {
                 val log = createLogFromState(votedFor = "Test")
                 log.getVotedFor() shouldBe "Test"
             }
+            test("should update the term") {
+                val log = createLogFromState(votedFor = "Test")
+                val newTerm = log.getTerm() + 1
+                log.setVotedFor("Test2", newTerm)
+                log.getTerm() shouldBe newTerm
+            }
             test("should return the node that was voted for after multiple changes") {
                 val log = createLogFromState(votedFor = "Test")
-                log.setVotedFor("Test2")
+                log.setVotedFor("Test2", log.getTerm())
                 log.getVotedFor() shouldBe "Test2"
             }
         }

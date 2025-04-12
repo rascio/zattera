@@ -109,7 +109,7 @@ class RaftMachineTest : FunSpec({
                     // Send a RequestVote with a higher term
                     val newTerm = underTest.getCurrentTerm() + 1
                     N1.sendTo(underTest) {
-                        RaftRpc.RequestVote(newTerm, N1.id, LogEntryMetadata.ZERO)
+                        RaftRpc.RequestVote(newTerm, N1.id, LogEntryMetadata(term = newTerm, index = underTest.log.getLastIndex()))
                     }
                     val waitChangeToFollower = launch {
                         failOnTimeout("timeout waiting for follower", 50.milliseconds) {

@@ -1,6 +1,6 @@
 package io.r.raft.client
 
-import io.r.raft.log.StateMachine
+import io.r.raft.persistence.StateMachine
 import io.r.raft.machine.RaftMachine.Companion.DIAGNOSTIC_MARKER
 import io.r.raft.machine.Response
 import io.r.raft.protocol.LogEntry

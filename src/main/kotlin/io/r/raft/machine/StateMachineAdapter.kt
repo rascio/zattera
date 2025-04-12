@@ -1,6 +1,6 @@
 package io.r.raft.machine
 
-import io.r.raft.log.StateMachine
+import io.r.raft.persistence.StateMachine
 import io.r.raft.protocol.LogEntry
 import io.r.utils.concurrency.ReadWriteLock
 import kotlinx.coroutines.CoroutineScope

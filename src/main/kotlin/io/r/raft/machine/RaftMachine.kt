@@ -1,8 +1,8 @@
 package io.r.raft.machine
 
-import io.r.raft.log.RaftLog
-import io.r.raft.log.RaftLog.Companion.getLastMetadata
-import io.r.raft.log.StateMachine
+import io.r.raft.persistence.RaftLog
+import io.r.raft.persistence.RaftLog.Companion.getLastMetadata
+import io.r.raft.persistence.StateMachine
 import io.r.raft.machine.StateMachineAdapter.Companion.isValidCommand
 import io.r.raft.protocol.LogEntry
 import io.r.raft.protocol.RaftMessage
@@ -17,24 +17,22 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.cancel
-import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.isActive
-import kotlinx.coroutines.job
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.selects.onTimeout
 import kotlinx.coroutines.selects.select
 import kotlinx.coroutines.withTimeout
 import org.apache.logging.log4j.LogManager
 import org.apache.logging.log4j.Logger
+import org.apache.logging.log4j.Marker
 import org.apache.logging.log4j.MarkerManager
 import org.apache.logging.log4j.kotlin.additionalLoggingContext
 import java.util.concurrent.ConcurrentHashMap
-import java.util.concurrent.atomic.AtomicBoolean
 
 class RaftMachine<C : StateMachine.Contract<*, *, *>>(
     private val configuration: Configuration,
@@ -98,7 +96,11 @@ class RaftMachine<C : StateMachine.Contract<*, *, *>>(
                 logger.debug("RaftMachine_Started")
                 while (isActive) {
                     logger.debug(DIAGNOSTIC_MARKER) {
-                        entry("RaftMachine_Loop", "role" to _role.value::class.simpleName, "state" to serverState)
+                        entry(
+                            "RaftMachine_Loop",
+                            "role" to _role.value::class.simpleName,
+                            "state" to serverState
+                        )
                     }
                     applyCommittedEntries()
 
@@ -175,7 +177,7 @@ class RaftMachine<C : StateMachine.Contract<*, *, *>>(
             }
 
             else -> {
-                when (val leader = serverState.leader) {
+                when (val leader = serverState.currentLeader) {
                     null -> Response.LeaderUnknown
                     else -> Response.NotALeader(cluster.getNode(leader).node)
                 }
@@ -216,7 +218,7 @@ class RaftMachine<C : StateMachine.Contract<*, *, *>>(
             }
 
             else -> {
-                val error = when (val leader = serverState.leader) {
+                val error = when (val leader = serverState.currentLeader) {
                     null -> Response.LeaderUnknown
                     else -> Response.NotALeader(cluster.getNode(leader).node)
                 }
@@ -278,6 +280,13 @@ class RaftMachine<C : StateMachine.Contract<*, *, *>>(
                     if (result != null) releaseCommit(it, result)
                 }
             }
+            /*
+             if (log.getSize() > config.snapshotThreshold) {
+                val snapshot = stateMachine.snapshot()
+                val metadata = log.getMetadata(serverState.lastApplied)
+                log.compact(snapshot, metadata)
+             }
+             */
         }
     }
 
@@ -332,7 +341,8 @@ class RaftMachine<C : StateMachine.Contract<*, *, *>>(
          * Timeout for the queries that are waiting for the leader
          * to confirm it is still the leader
          */
-        val pendingQueryTimeout: Long = 1000
+        val pendingQueryTimeout: Long = 1000,
+        val snapshotChunkSize: Int = 1024,
     )
 
     private fun createFollower(serverState: ServerState = _role.value.serverState) = Follower(
@@ -361,7 +371,7 @@ class RaftMachine<C : StateMachine.Contract<*, *, *>>(
     )
 
     companion object {
-        val DIAGNOSTIC_MARKER = MarkerManager.getMarker("RAFT_DIAGNOSTIC")
+        val DIAGNOSTIC_MARKER: Marker = MarkerManager.getMarker("RAFT_DIAGNOSTIC")
         private val logger: Logger = LogManager.getLogger(RaftMachine::class.java)
 
     }

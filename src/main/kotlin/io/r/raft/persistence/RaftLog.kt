@@ -1,4 +1,4 @@
-package io.r.raft.log
+package io.r.raft.persistence
 
 import io.r.raft.protocol.Index
 import io.r.raft.protocol.LogEntry
@@ -50,7 +50,7 @@ interface RaftLog {
     /**
      * Set the node that was voted for
      */
-    suspend fun setVotedFor(nodeId: NodeId)
+    suspend fun setVotedFor(nodeId: NodeId, term: Term)
 
     /**
      * Get the node that was voted for
@@ -58,8 +58,6 @@ interface RaftLog {
     suspend fun getVotedFor(): NodeId?
 
     companion object {
-        suspend fun RaftLog.getEntry(index: Index): LogEntry? =
-            getEntries(index, 1).firstOrNull()
         suspend fun RaftLog.getLastMetadata(): LogEntryMetadata =
             checkNotNull(getMetadata(getLastIndex())) { "Metadata of last index must not be null" }
 

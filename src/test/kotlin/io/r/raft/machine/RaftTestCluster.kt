@@ -1,7 +1,7 @@
 package io.r.raft.machine
 
 import arrow.fx.coroutines.ResourceScope
-import io.r.raft.log.StateMachine
+import io.r.raft.persistence.StateMachine
 import io.r.raft.protocol.NodeId
 import io.r.raft.test.installCoroutine
 import io.r.raft.transport.inmemory.RaftClusterTestNetwork

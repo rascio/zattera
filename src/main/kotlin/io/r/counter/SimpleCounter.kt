@@ -1,7 +1,7 @@
 package io.r.counter
 
 import arrow.atomic.AtomicLong
-import io.r.raft.log.StateMachine
+import io.r.raft.persistence.StateMachine
 import io.r.utils.JacocoExclusionNeedsGenerated
 import io.r.utils.logs.entry
 import kotlinx.serialization.Serializable

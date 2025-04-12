@@ -4,8 +4,8 @@ import io.r.raft.protocol.NodeId
 import io.r.raft.protocol.RaftMessage
 import io.r.raft.protocol.RaftRpc
 import io.r.raft.protocol.RaftRole
-import io.r.raft.log.RaftLog
-import io.r.raft.log.RaftLog.Companion.getLastMetadata
+import io.r.raft.persistence.RaftLog
+import io.r.raft.persistence.RaftLog.Companion.getLastMetadata
 import io.r.raft.transport.RaftCluster
 import io.r.raft.transport.RaftCluster.Companion.quorum
 import io.r.utils.logs.entry

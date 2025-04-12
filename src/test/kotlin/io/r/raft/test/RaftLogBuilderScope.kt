@@ -4,7 +4,7 @@ import io.r.raft.protocol.Index
 import io.r.raft.protocol.LogEntry
 import io.r.raft.protocol.NodeId
 import io.r.raft.protocol.Term
-import io.r.raft.log.inmemory.InMemoryRaftLog
+import io.r.raft.persistence.inmemory.InMemoryRaftLog
 import io.r.raft.protocol.randomAlphabetic
 import java.util.TreeMap
 import java.util.UUID

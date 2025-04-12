@@ -14,6 +14,8 @@ Arguments:
     store logs in the .logs directory
   -kv: enable key-value store
     enable key-value store
+  -persistent: enable persistence to file
+    store the log in a file named <node_id>.log
   -help: show this help message
 "
 while [[ $# -gt 0 ]]
@@ -42,6 +44,10 @@ do
       kv=true
       shift
       ;;
+    -persistent)
+      persistent=true
+      shift
+      ;;
     -help)
       echo "$help_message"
       exit 0
@@ -66,7 +72,12 @@ for i in $(seq 1 $cluster_size); do
     peers="$peers --peer N$i=localhost:$((8080 + $i))"
 done
 
-program_args="N$node --port $port $peers $timeout_params"
+if [ "$persistent" = true ]; then
+  # if persistent is enabled, add the --persistent argument
+  persistent_params="--raft-log-file N$node.log"
+fi
+
+program_args="N$node --port $port $peers $timeout_params $persistent_params"
 
 #if key-value store is enabled, add the --state-machine argument
 if [ "$kv" = true ]; then

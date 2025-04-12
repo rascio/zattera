@@ -1,8 +1,10 @@
 package io.r.raft.machine
 
 import arrow.fx.coroutines.resourceScope
+import io.kotest.assertions.withClue
 import io.kotest.core.spec.style.FunSpec
-import io.r.raft.log.RaftLog.Companion.getLastMetadata
+import io.kotest.matchers.shouldBe
+import io.r.raft.persistence.RaftLog.Companion.getLastMetadata
 import io.r.raft.protocol.LogEntryMetadata
 import io.r.raft.protocol.RaftMessage
 import io.r.raft.protocol.RaftRole
@@ -14,6 +16,7 @@ import io.r.raft.test.shouldReceive
 import io.r.raft.transport.RaftCluster
 import io.r.raft.transport.inmemory.InMemoryRaftClusterNode.Companion.shouldReceive
 import io.r.raft.transport.inmemory.installRaftClusterNetwork
+import io.r.utils.entry
 import kotlin.time.Duration.Companion.seconds
 
 class FollowerTest : FunSpec({
@@ -66,8 +69,8 @@ class FollowerTest : FunSpec({
                     )
                 }
                 test("should not grant the vote for another node when receiving a RequestVote if already voted") {
-                    log.setVotedFor("N1")
                     val electionTerm = log.getTerm()
+                    log.setVotedFor("N1", electionTerm)
                     underTest.onReceivedMessage(
                         RaftMessage(
                             from = "N2",
@@ -110,6 +113,8 @@ class FollowerTest : FunSpec({
                             voteGranted = false
                         )
                     )
+                    log.getVotedFor() shouldBe null
+                    log.getTerm() shouldBe electionTerm
                 }
 
                 test("should reject AppendEntries false when the term is smaller") {
@@ -195,6 +200,109 @@ class FollowerTest : FunSpec({
                             entries = 0
                         )
                     )
+                }
+                test("should commit up to the index of the last entry (the leader may be ahead)") {
+                    val prevLog = log.getLastMetadata()
+                    val entries = listOf(
+                        entry(term = log.getTerm(), command = "first"),
+                        entry(term = log.getTerm(), command = "second"),
+                    )
+                    val term = log.getTerm()
+                    underTest.onReceivedMessage(
+                        RaftMessage(
+                            from = "N1",
+                            to = "UnderTest",
+                            rpc = AppendEntries(
+                                term = term,
+                                leaderId = "N1",
+                                prevLog = prevLog,
+                                entries = entries,
+                                leaderCommit = entries.size + 5L
+                            )
+                        )
+                    )
+
+                    N1 shouldReceive RaftMessage(
+                        from = "UnderTest",
+                        to = "N1",
+                        rpc = AppendEntriesResponse(
+                            term = term,
+                            matchIndex = prevLog.index + entries.size.toLong(),
+                            success = true,
+                            entries = entries.size
+                        )
+                    )
+                    underTest.serverState.commitIndex shouldBe prevLog.index + entries.size.toLong()
+                }
+                test("should not commit if the leaderCommit is smaller than the current commitIndex") {
+                    val prevLog = log.getLastMetadata()
+                    val entries = listOf(
+                        entry(term = log.getTerm(), command = "first"),
+                        entry(term = log.getTerm(), command = "second"),
+                    )
+                    val term = log.getTerm()
+                    underTest.onReceivedMessage(
+                        RaftMessage(
+                            from = "N1",
+                            to = "UnderTest",
+                            rpc = AppendEntries(
+                                term = term,
+                                leaderId = "N1",
+                                prevLog = prevLog,
+                                entries = entries,
+                                leaderCommit = prevLog.index
+                            )
+                        )
+                    )
+
+                    N1 shouldReceive RaftMessage(
+                        from = "UnderTest",
+                        to = "N1",
+                        rpc = AppendEntriesResponse(
+                            term = term,
+                            matchIndex = prevLog.index + entries.size.toLong(),
+                            success = true,
+                            entries = entries.size
+                        )
+                    )
+                    underTest.serverState.commitIndex shouldBe prevLog.index
+                }
+                test("should commit up to the leaderCommit index") {
+                    val prevLog = log.getLastMetadata()
+                    val entries = listOf(
+                        entry(term = log.getTerm(), command = "first"),
+                        entry(term = log.getTerm(), command = "second"),
+                        entry(term = log.getTerm(), command = "third"),
+                    )
+                    val term = log.getTerm()
+                    underTest.onReceivedMessage(
+                        RaftMessage(
+                            from = "N1",
+                            to = "UnderTest",
+                            rpc = AppendEntries(
+                                term = term,
+                                leaderId = "N1",
+                                prevLog = prevLog,
+                                entries = entries,
+                                leaderCommit = prevLog.index + 1L
+                            )
+                        )
+                    )
+
+                    withClue("prevLog=${prevLog}") {
+
+                        N1 shouldReceive RaftMessage(
+                            from = "UnderTest",
+                            to = "N1",
+                            rpc = AppendEntriesResponse(
+                                term = term,
+                                matchIndex = prevLog.index + entries.size.toLong(),
+                                success = true,
+                                entries = entries.size
+                            )
+                        )
+                        underTest.serverState.commitIndex shouldBe prevLog.index + 1L
+                    }
                 }
             }
 

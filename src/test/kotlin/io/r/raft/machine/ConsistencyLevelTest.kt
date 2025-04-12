@@ -2,7 +2,6 @@ package io.r.raft.machine
 
 import arrow.fx.coroutines.resourceScope
 import io.kotest.assertions.withClue
-import io.kotest.core.NamedTag
 import io.kotest.core.Tag
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.matchers.shouldBe
@@ -70,7 +69,7 @@ class ConsistencyLevelTest : FunSpec({
                     stateMachineFactory = { StringsKeyValueStore() }
                 )
                 val clientConfiguration = RaftClusterClient.Configuration(
-                    retry = 30,
+                    retry = 50,
                     delay = 200..300L,
                     jitter = 100..200L
                 )

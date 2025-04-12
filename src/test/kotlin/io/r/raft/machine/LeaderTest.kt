@@ -5,8 +5,8 @@ import arrow.fx.coroutines.resourceScope
 import io.kotest.common.ExperimentalKotest
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.matchers.shouldBe
-import io.r.raft.log.RaftLog.Companion.getLastMetadata
-import io.r.raft.log.inmemory.InMemoryRaftLog
+import io.r.raft.persistence.RaftLog.Companion.getLastMetadata
+import io.r.raft.persistence.inmemory.InMemoryRaftLog
 import io.r.raft.protocol.LogEntry
 import io.r.raft.protocol.LogEntryMetadata
 import io.r.raft.protocol.NodeId
@@ -29,7 +29,6 @@ import kotlinx.coroutines.selects.onTimeout
 import kotlinx.coroutines.selects.select
 import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.withTimeoutOrNull
-import kotlinx.coroutines.yield
 import org.apache.logging.log4j.LogManager
 import kotlin.test.assertEquals
 import kotlin.test.assertIs

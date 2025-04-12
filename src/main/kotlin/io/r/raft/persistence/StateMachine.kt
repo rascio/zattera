@@ -1,4 +1,4 @@
-package io.r.raft.log
+package io.r.raft.persistence
 
 import kotlinx.serialization.KSerializer
 

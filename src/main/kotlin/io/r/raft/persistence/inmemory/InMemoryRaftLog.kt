@@ -1,8 +1,8 @@
-package io.r.raft.log.inmemory
+package io.r.raft.persistence.inmemory
 
 import arrow.core.continuations.AtomicRef
-import io.r.raft.log.RaftLog
-import io.r.raft.log.RaftLog.Companion.AppendResult
+import io.r.raft.persistence.RaftLog
+import io.r.raft.persistence.RaftLog.Companion.AppendResult
 import io.r.raft.protocol.Index
 import io.r.raft.protocol.LogEntry
 import io.r.raft.protocol.LogEntryMetadata
@@ -43,7 +43,7 @@ class InMemoryRaftLog(
     override suspend fun getMetadata(index: Index): LogEntryMetadata? {
         return when {
             index == 0L -> LogEntryMetadata.ZERO
-            else -> log[index]?.let { (term, _) -> LogEntryMetadata(index, term) }
+            else -> log[index]?.let { entry -> LogEntryMetadata(index, entry.term) }
                 ?: run {
                     logger.warn(entry("LogEntry_Not_Found", "index" to index))
                     null
@@ -75,15 +75,16 @@ class InMemoryRaftLog(
         }
     }
 
-    override suspend fun setVotedFor(nodeId: NodeId) {
+    override suspend fun setVotedFor(nodeId: NodeId, term: Term) {
         votedFor.set(nodeId)
+        this.term.set(term)
     }
 
     override suspend fun getVotedFor(): NodeId? {
         return votedFor.get()
     }
 
-    private fun getLastIndexInternal() = log.size.toLong() - 1
+    private fun getLastIndexInternal() = log.lastEntry()?.key ?: 0L
 
     companion object {
         private val logger: Logger = LogManager.getLogger(InMemoryRaftLog::class.java)
